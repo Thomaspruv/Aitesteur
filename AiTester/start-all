@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Lance ce dont l'app a besoin en local, sous Valet : le site lui-même est
+# servi en permanence par nginx (pas besoin de "démarrer" quoi que ce soit
+# pour ça — http://aitester.test répond tant que Valet tourne). Ce script ne
+# gère donc que ce que Valet ne gère pas : la queue (crawls/runs en arrière-
+# plan) et, optionnellement, Vite pour le hot-reload CSS/JS pendant le dev.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+echo "==> Vérification des dépendances PHP..."
+if [ ! -d vendor ]; then
+    echo "    Installation (composer install)..."
+    composer install
+fi
+
+echo "==> Vérification des dépendances JS..."
+if [ ! -d node_modules ]; then
+    echo "    Installation (npm install)..."
+    npm install
+fi
+
+if [ ! -f .env ]; then
+    echo "==> Création du fichier .env..."
+    cp .env.example .env
+    php artisan key:generate
+fi
+
+if [ ! -L public/storage ]; then
+    echo "==> Création du lien de stockage public (captures d'écran, etc.)..."
+    php artisan storage:link
+fi
+
+echo "==> Application des migrations..."
+php artisan migrate
+
+APP_URL="$(grep -m1 '^APP_URL=' .env | cut -d '=' -f2-)"
+
+if ! curl -s -o /dev/null --max-time 2 "$APP_URL"; then
+    echo ""
+    echo "⚠️  ${APP_URL} ne répond pas — Valet ne semble pas actif."
+    echo "    Lancez \`valet start\` (ou relancez Valet depuis son app) puis relancez ce script."
+    exit 1
+fi
+
+echo ""
+echo "==> Site déjà servi en permanence par Valet sur ${APP_URL}"
+echo "==> Démarrage de la queue (+ Vite pour le hot-reload CSS/JS)..."
+echo "    Ctrl+C pour tout arrêter."
+echo ""
+
+exec npx concurrently -c "#c4b5fd,#93c5fd" \
+    "php artisan queue:listen --tries=1 --timeout=0" \
+    "npm run dev" \
+    --names=queue,vite \
+    --kill-others-on-fail
