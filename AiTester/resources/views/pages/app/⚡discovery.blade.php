@@ -10,6 +10,7 @@ use App\Jobs\RunDiscoveryCrawl;
 use App\Jobs\RunWorkflow;
 use App\Models\Workflow;
 use App\Services\Ai\WorkflowStepCompiler;
+use App\Support\UrlHost;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
@@ -29,6 +30,8 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
     public string $crawlPassword = '';
 
     public bool $showCredentials = false;
+
+    public bool $targetAuthorized = false;
 
     public string $candidateFilter = 'pending';
 
@@ -79,6 +82,24 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
     public function storedUsername(): ?string
     {
         return $this->project?->primaryEnvironment()?->username;
+    }
+
+    /**
+     * True once the URL field points at a different host than whatever is
+     * already authorized for this project's environment — mirrors the same
+     * check in settings-environment, since launching a discovery here can
+     * change that environment's URL too (see launchDiscovery() below).
+     */
+    #[Computed]
+    public function needsAuthorizationConfirmation(): bool
+    {
+        $environment = $this->project?->primaryEnvironment();
+
+        if (! $environment?->hasAuthorizedTarget()) {
+            return $this->crawlUrl !== '';
+        }
+
+        return UrlHost::of($this->crawlUrl) !== UrlHost::of($environment->url);
     }
 
     #[Computed]
@@ -270,6 +291,14 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
             'crawlPassword' => 'nullable|string|max:255',
         ]);
 
+        $needsAuthorizationConfirmation = $this->needsAuthorizationConfirmation;
+
+        if ($needsAuthorizationConfirmation && ! $this->targetAuthorized) {
+            $this->addError('targetAuthorized', __("Confirmez que vous êtes autorisé à tester ce site avant de lancer la découverte."));
+
+            return;
+        }
+
         RateLimiter::hit($rateLimitKey, decaySeconds: 3600);
 
         $environment = $this->project->primaryEnvironment()
@@ -282,6 +311,8 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
             // changing the URL would silently wipe saved credentials.
             'username' => $this->crawlUsername !== '' ? $this->crawlUsername : $environment->username,
             'password' => $this->crawlPassword !== '' ? $this->crawlPassword : $environment->password,
+            'target_authorized_at' => $needsAuthorizationConfirmation ? now() : $environment->target_authorized_at,
+            'target_authorized_host' => $needsAuthorizationConfirmation ? UrlHost::of($this->crawlUrl) : $environment->target_authorized_host,
         ]);
 
         $discoveryRun = $this->project->discoveryRuns()->create([
@@ -292,7 +323,8 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
         RunDiscoveryCrawl::dispatch($discoveryRun);
 
         $this->crawlPassword = '';
-        unset($this->latestDiscoveryRun);
+        $this->targetAuthorized = false;
+        unset($this->latestDiscoveryRun, $this->needsAuthorizationConfirmation);
 
         Flux::toast(variant: 'success', text: __('Découverte lancée — ça peut prendre quelques minutes.'));
     }
@@ -303,7 +335,7 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
         <div class="rounded-[14px] border border-at-border bg-at-surface p-5 backdrop-blur-md">
             <div class="mb-1 text-[13px] font-semibold">{{ __('Lancer une découverte automatique') }}</div>
             <p class="mb-3.5 text-[12px] text-at-muted">
-                {{ __("Donnez une URL — on explore les pages accessibles depuis là (liens du même domaine uniquement, aucun bouton cliqué ni formulaire soumis à part connexion/création de compte) et on en tire des parcours candidats. Si vous fournissez des identifiants, on essaie de se connecter, et si ça ne marche pas on essaie de créer le compte avec ces identifiants. Plafond : 20 pages, ~3 min.") }}
+                {{ __("Donnez une URL — on explore les pages accessibles depuis là (même domaine uniquement), y compris via les liens, les popups, les menus/modales et le scroll infini ; aucun formulaire n'est soumis à part connexion/création de compte. Si vous fournissez des identifiants, on essaie de se connecter, et si ça ne marche pas on essaie de créer le compte avec ces identifiants. Plafond : 20 pages, ~3 min.") }}
             </p>
 
             @if ($this->latestDiscoveryRun?->isInProgress())
@@ -376,6 +408,16 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
                     <p class="text-[11px] text-at-muted">
                         {{ __('Chiffrés au repos, jamais journalisés — remplace la valeur par défaut uniquement pour cette découverte.') }}
                     </p>
+                @endif
+
+                @if ($this->needsAuthorizationConfirmation)
+                    <label class="flex items-start gap-2 rounded-[9px] border border-at-border-2 bg-at-bg px-3 py-2.5 text-[12px] text-at-text-2">
+                        <input type="checkbox" wire:model="targetAuthorized" class="mt-0.5" />
+                        <span>{{ __("Je certifie être propriétaire de ce site, ou autorisé par son propriétaire à y lancer des explorations et tests automatisés (navigation, clics, tentatives de connexion).") }}</span>
+                    </label>
+                    @error('targetAuthorized')
+                        <div class="text-[11.5px] text-verdict-broken">{{ $message }}</div>
+                    @enderror
                 @endif
 
                 <button

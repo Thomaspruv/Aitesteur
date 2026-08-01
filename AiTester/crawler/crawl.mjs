@@ -56,6 +56,7 @@ import {
     classifyForm,
     fillAndSubmitAuthForm,
     captureScreenshot,
+    installPrivateNetworkGuard,
 } from './lib/shared.mjs';
 
 const MAX_PAGES_DEFAULT = 20;
@@ -321,9 +322,19 @@ async function main() {
     const password = process.env.CRAWL_PASSWORD || '';
     let browser;
 
+    let guard;
     try {
         browser = await chromium.launch({ headless: true });
-        const context = await browser.newContext({ ignoreHTTPSErrors: true });
+        // serviceWorkers: 'block' — Playwright's own request interception
+        // (context.route(), used by installPrivateNetworkGuard below) does not
+        // see requests made by a Service Worker, so a page registering one
+        // could otherwise reach an internal address with zero SSRF screening.
+        const context = await browser.newContext({ ignoreHTTPSErrors: true, serviceWorkers: 'block' });
+        // assertPublicHost above only screened the start URL — a redirect (or
+        // a same-origin host whose DNS record changes mid-crawl) is never
+        // re-checked otherwise. This intercepts every request on this context
+        // (main page and any popup) for its whole lifetime, closing that gap.
+        guard = await installPrivateNetworkGuard(context);
         const page = await context.newPage();
         page.setDefaultTimeout(NAV_TIMEOUT_MS);
         page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
@@ -648,6 +659,19 @@ async function main() {
         if (browser) {
             await browser.close().catch(() => {});
         }
+    }
+
+    // installPrivateNetworkGuard closes the context the moment it observes a
+    // response from a private/internal address (the redirect backstop — see
+    // its comment in shared.mjs) — that context closure surfaces as ordinary
+    // "Target closed" errors deep inside the crawl loop, many of which are
+    // individually swallowed by that code's own per-page/per-click resilience
+    // catches. Overriding the result here, after everything else has settled,
+    // is what turns "quietly produced a truncated but ok:true result" into an
+    // explicit, correctly-diagnosed failure.
+    if (guard?.blockedAddress) {
+        result.ok = false;
+        result.error = `Cible non autorisée : une réponse provenait de l'adresse réseau privée/interne ${guard.blockedAddress}.`;
     }
 
     finish();

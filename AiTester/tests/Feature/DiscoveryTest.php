@@ -223,10 +223,12 @@ test('launching a discovery run saves the environment url and dispatches the cra
         ->set('crawlUrl', 'https://staging.example.com')
         ->set('crawlUsername', 'demo')
         ->set('crawlPassword', 'secret')
+        ->set('targetAuthorized', true)
         ->call('launchDiscovery');
 
     expect($project->primaryEnvironment()->url)->toBe('https://staging.example.com')
         ->and($project->primaryEnvironment()->username)->toBe('demo')
+        ->and($project->primaryEnvironment()->target_authorized_at)->not->toBeNull()
         ->and($project->latestDiscoveryRun()->status)->toBe(DiscoveryRunStatus::Queued);
 
     Queue::assertPushed(RunDiscoveryCrawl::class, fn ($job) => $job->discoveryRun->project_id === $project->id);
@@ -244,6 +246,7 @@ test('relaunching a discovery without retyping credentials keeps the ones alread
         ->set('crawlUrl', 'https://staging.example.com')
         ->set('crawlUsername', 'demo')
         ->set('crawlPassword', 'secret')
+        ->set('targetAuthorized', true)
         ->call('launchDiscovery');
 
     $project->latestDiscoveryRun()->update(['status' => DiscoveryRunStatus::Completed]);
@@ -360,6 +363,7 @@ test('launching too many discoveries in a short window is rate limited', functio
     for ($i = 0; $i < 5; $i++) {
         Livewire::test('pages::app.discovery')
             ->set('crawlUrl', 'https://staging.example.com')
+            ->set('targetAuthorized', true)
             ->call('launchDiscovery');
 
         $project->latestDiscoveryRun()->update(['status' => DiscoveryRunStatus::Completed]);
@@ -367,6 +371,7 @@ test('launching too many discoveries in a short window is rate limited', functio
 
     Livewire::test('pages::app.discovery')
         ->set('crawlUrl', 'https://staging.example.com')
+        ->set('targetAuthorized', true)
         ->call('launchDiscovery');
 
     Queue::assertPushed(RunDiscoveryCrawl::class, 5);

@@ -12,6 +12,7 @@ use App\Models\AppGraphNode;
 use App\Models\DiscoveryRun;
 use App\Models\Project;
 use App\Services\Ai\DiscoveryAnnotator;
+use App\Support\UrlHost;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Collection;
@@ -81,6 +82,17 @@ class RunDiscoveryCrawl implements ShouldQueue
             return;
         }
 
+        // Defense in depth: the UI already blocks changing an environment's
+        // URL without this confirmation, but the crawler now clicks things
+        // and attempts logins on whatever URL is configured here, so the job
+        // itself must not trust that the UI path was the only way this
+        // environment's URL got set.
+        if (! $environment->hasAuthorizedTarget()) {
+            $this->markFailed('Aucune autorisation confirmée pour cette cible — confirmez dans Réglages environnement avant de lancer une découverte.');
+
+            return;
+        }
+
         Storage::disk('local')->makeDirectory('discovery');
         $outputPath = Storage::disk('local')->path("discovery/{$this->discoveryRun->id}.json");
 
@@ -120,9 +132,7 @@ class RunDiscoveryCrawl implements ShouldQueue
 
     protected function normalizeUrl(string $url): string
     {
-        return str_starts_with($url, 'http://') || str_starts_with($url, 'https://')
-            ? $url
-            : 'https://'.$url;
+        return UrlHost::normalize($url);
     }
 
     /**

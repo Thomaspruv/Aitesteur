@@ -9,12 +9,17 @@ export const NAV_TIMEOUT_MS = 15000;
 
 // --- SSRF guard: refuse to navigate to a host that resolves to a private,
 // loopback, link-local (includes the 169.254.169.254 cloud metadata
-// endpoint), or otherwise non-public IP range. Checked once against the
-// target's start URL before the browser ever launches — every subsequent
-// navigation is same-origin (see sameOrigin() below), so this single check
-// covers the whole session. Known residual risk, accepted for this simplified
-// V1: DNS rebinding between this check and the actual page loads is not
-// defended against (would need IP-pinned connections, out of scope here). ---
+// endpoint), or otherwise non-public IP range. Enforced two ways: a fast
+// upfront rejection of the start URL (assertPublicHost, before the browser
+// even launches), and installPrivateNetworkGuard() below, which intercepts
+// every request on every page/popup in the context for the life of the
+// crawl/run — this is what actually stops an HTTP redirect (or a same-
+// origin page whose DNS record changes mid-crawl) from reaching an internal
+// address, since neither of those is caught by a single upfront check on the
+// start URL alone. Known residual risk: a DNS-rebinding attack that changes
+// resolution *between* this lookup and the connection Chromium then makes to
+// the address it resolved would still slip through — closing that would need
+// IP-pinned connections, out of scope here. ---
 const BLOCKED_IPV4_RANGES = [
     '0.0.0.0/8',
     '10.0.0.0/8',
@@ -55,18 +60,119 @@ function isBlockedIpv6(ip) {
     );
 }
 
-export async function assertPublicHost(hostname) {
+async function resolveIsHostPublic(hostname) {
     let address, family;
     try {
         ({ address, family } = await lookup(hostname));
     } catch {
-        throw new Error(`Impossible de résoudre l'hôte : ${hostname}`);
+        return false;
     }
 
-    const blocked = family === 6 ? isBlockedIpv6(address) : isBlockedIpv4(address);
-    if (blocked) {
-        throw new Error(`Cible non autorisée : ${hostname} pointe vers une adresse réseau privée ou interne.`);
+    return family === 6 ? !isBlockedIpv6(address) : !isBlockedIpv4(address);
+}
+
+export async function assertPublicHost(hostname) {
+    if (!(await resolveIsHostPublic(hostname))) {
+        throw new Error(`Cible non autorisée : ${hostname} est introuvable ou pointe vers une adresse réseau privée ou interne.`);
     }
+}
+
+// Installs the guard described above on a BrowserContext — covers the main
+// page and any popup opened within it (context.on('page') captures don't get
+// their own route() call anywhere, so this is the only thing standing between
+// a popup and an internal address). Results are cached per-hostname for the
+// life of the context: a redirect chain or a busy page can reference the same
+// host dozens of times, and re-running a DNS lookup for each would add real
+// latency for no additional safety.
+//
+// Three layers, because no single Playwright interception point covers
+// everything a page can trigger:
+//   - context.route() (below) blocks a request before it's ever sent — but
+//     Playwright does NOT invoke it for the target of an HTTP redirect (only
+//     the first URL in a redirect chain gets a route handler at all), so a
+//     same-origin page that later 302s to an internal address sails through.
+//   - context.routeWebSocket() covers ws:/wss: connections specifically —
+//     route() never sees WebSocket traffic at all, by design.
+//   - context.on('response') is the backstop that actually closes the
+//     redirect gap: it fires with the IP address Chromium really connected
+//     to (serverAddr()), after the connection already happened. There's no
+//     way to abort a single response this late, so a private-address hit
+//     kills the whole browser context instead — every further/in-flight
+//     Playwright call then rejects, which the caller turns into a failed
+//     run rather than a silent success that quietly visited an internal
+//     address. The caller must check the returned object's `blockedAddress`
+//     after its own try/catch, since a rejection deep in click-exploration
+//     can otherwise get swallowed by that code's own resilience catches.
+export async function installPrivateNetworkGuard(context) {
+    const isPublicByHostname = new Map();
+    const guardState = { blockedAddress: null };
+
+    async function isHostPublic(hostname) {
+        let isPublic = isPublicByHostname.get(hostname);
+        if (isPublic === undefined) {
+            isPublic = await resolveIsHostPublic(hostname);
+            isPublicByHostname.set(hostname, isPublic);
+        }
+        return isPublic;
+    }
+
+    function killIfPrivate(ipAddress) {
+        if (guardState.blockedAddress || !ipAddress) return;
+        const isPublic = ipAddress.includes(':') ? !isBlockedIpv6(ipAddress) : !isBlockedIpv4(ipAddress);
+        if (!isPublic) {
+            guardState.blockedAddress = ipAddress;
+            context.close().catch(() => {});
+        }
+    }
+
+    context.on('response', (response) => {
+        response
+            .serverAddr()
+            .then((addr) => killIfPrivate(addr?.ipAddress))
+            .catch(() => {});
+    });
+
+    // Unlike context.route(), a routed WebSocket does NOT connect to the real
+    // server unless connectToServer() is called — so for a blocked host,
+    // simply not calling it (the same "do nothing" as an aborted http(s)
+    // request) is enough to block it outright.
+    await context.routeWebSocket('**/*', async (ws) => {
+        let url;
+        try {
+            url = new URL(ws.url());
+        } catch {
+            return;
+        }
+
+        if (await isHostPublic(url.hostname)) {
+            ws.connectToServer();
+        }
+    });
+
+    await context.route('**/*', async (route) => {
+        let url;
+        try {
+            url = new URL(route.request().url());
+        } catch {
+            return route.abort('blockedbyclient');
+        }
+
+        // Only http(s) requests go out to a remote host at all — data:, blob:,
+        // and about:blank (the page's initial state before the first goto)
+        // have no hostname to resolve and can't reach anything internal.
+        // ws:/wss: is handled separately above — route() never sees it.
+        if (!['http:', 'https:'].includes(url.protocol)) {
+            return route.continue();
+        }
+
+        if (!(await isHostPublic(url.hostname))) {
+            return route.abort('blockedbyclient');
+        }
+
+        return route.continue();
+    });
+
+    return guardState;
 }
 
 export function parseArgs(argv) {

@@ -32,7 +32,7 @@ test('a successful crawl persists the app graph and candidate workflows', functi
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -78,7 +78,7 @@ test('graph nodes sharing the same heading fall back to a path-based label inste
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -116,7 +116,7 @@ test('re-running discovery does not duplicate an already-proposed candidate', fu
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $project->workflows()->create([
         'name' => 'Connexion',
@@ -153,7 +153,7 @@ test('form pages with a colliding title fall back to a humanized, deduplicated p
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -189,7 +189,7 @@ test('a trailing uuid segment is dropped instead of truncated mid-uuid', functio
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -222,7 +222,7 @@ test('a uuid in the middle of the path is dropped, not just a trailing one', fun
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -263,7 +263,7 @@ test('re-crawling the same page does not duplicate it even if the generated name
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     // Simulate a prior run that already proposed this exact page under an older name.
     $project->workflows()->create([
@@ -308,7 +308,7 @@ test('form pages are named by the ai annotator when the project has one configur
     $project = $user->currentProject();
     $project->update(['ai_provider' => AiProvider::DeepSeek, 'ai_model' => 'deepseek-chat', 'ai_api_key' => 'sk-test']);
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     Http::fake([
         'api.deepseek.com/*' => Http::response([
@@ -353,7 +353,7 @@ test('a crawl error marks the discovery run as failed', function () {
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://not-a-real-domain.invalid']);
+    $environment->update(['url' => 'https://not-a-real-domain.invalid', 'target_authorized_at' => now(), 'target_authorized_host' => 'not-a-real-domain.invalid']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -370,11 +370,32 @@ test('a crawl error marks the discovery run as failed', function () {
         ->and($discoveryRun->error)->toBe("L'URL fournie n'est pas valide.");
 });
 
-test('missing crawl output marks the discovery run as failed', function () {
+test('a discovery run against an unauthorized target fails cleanly without ever invoking the crawler', function () {
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
     $environment->update(['url' => 'https://example.com']);
+
+    $discoveryRun = DiscoveryRun::factory()->create([
+        'project_id' => $project->id,
+        'environment_id' => $environment->id,
+    ]);
+
+    Process::fake();
+
+    (new RunDiscoveryCrawl($discoveryRun))->handle();
+
+    expect($discoveryRun->fresh()->status)->toBe(DiscoveryRunStatus::Failed)
+        ->and($discoveryRun->fresh()->error)->toContain('Aucune autorisation confirmée');
+
+    Process::assertNothingRan();
+});
+
+test('missing crawl output marks the discovery run as failed', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $environment = $project->environments()->first();
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,
@@ -393,7 +414,7 @@ test('an unanticipated exception during persist marks the run failed instead of 
     $project = $user->currentProject();
     $project->update(['ai_provider' => AiProvider::DeepSeek, 'ai_model' => 'deepseek-chat', 'ai_api_key' => 'sk-test']);
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     // Simulate the real-world failure mode found in review: DeepSeek is unreachable
     // (a network-level ConnectionException, not the handled AiClientException).
@@ -448,7 +469,7 @@ test('popup and modal nodes discovered while clicking are persisted, labeled, co
     $user = User::factory()->create();
     $project = $user->currentProject();
     $environment = $project->environments()->first();
-    $environment->update(['url' => 'https://example.com']);
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $discoveryRun = DiscoveryRun::factory()->create([
         'project_id' => $project->id,

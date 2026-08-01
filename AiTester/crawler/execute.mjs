@@ -32,6 +32,7 @@ import {
     classifyForm,
     fillAndSubmitAuthForm,
     captureScreenshot,
+    installPrivateNetworkGuard,
 } from './lib/shared.mjs';
 
 const MAX_STEPS = 15;
@@ -428,9 +429,19 @@ async function main() {
     const password = process.env.CRAWL_PASSWORD || '';
     let browser;
 
+    let guard;
     try {
         browser = await chromium.launch({ headless: true });
-        const context = await browser.newContext({ ignoreHTTPSErrors: true });
+        // serviceWorkers: 'block' — Playwright's own request interception
+        // (context.route(), used by installPrivateNetworkGuard below) does not
+        // see requests made by a Service Worker, so a page registering one
+        // could otherwise reach an internal address with zero SSRF screening.
+        const context = await browser.newContext({ ignoreHTTPSErrors: true, serviceWorkers: 'block' });
+        // assertPublicHost above only screened the start URL — a redirect (or
+        // a same-origin host whose DNS record changes mid-run) is never
+        // re-checked otherwise. This intercepts every request on this context
+        // for its whole lifetime, closing that gap.
+        guard = await installPrivateNetworkGuard(context);
         const page = await context.newPage();
         page.setDefaultTimeout(NAV_TIMEOUT_MS);
         page.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
@@ -500,6 +511,19 @@ async function main() {
         if (browser) {
             await browser.close().catch(() => {});
         }
+    }
+
+    // installPrivateNetworkGuard closes the context the moment it observes a
+    // response from a private/internal address (the redirect backstop — see
+    // its comment in shared.mjs) — that context closure surfaces as an
+    // ordinary "Target closed" error from whatever step was in flight, which
+    // runStep()'s own retry/catch could otherwise report as a plain BROKEN
+    // step rather than the security-relevant abort it actually was.
+    // Overriding the result here is what makes that diagnosis explicit.
+    if (guard?.blockedAddress) {
+        result.ok = false;
+        result.verdict = null;
+        result.error = `Cible non autorisée : une réponse provenait de l'adresse réseau privée/interne ${guard.blockedAddress}.`;
     }
 
     finish();

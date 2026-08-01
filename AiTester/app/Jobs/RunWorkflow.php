@@ -7,6 +7,7 @@ use App\Enums\Verdict;
 use App\Enums\WorkflowStatus;
 use App\Models\Run;
 use App\Models\RunStep;
+use App\Support\UrlHost;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
@@ -73,6 +74,17 @@ class RunWorkflow implements ShouldQueue
 
         if (! $environment?->url) {
             $this->markFailed("Aucune URL n'est configurée pour cet environnement.");
+
+            return;
+        }
+
+        // Defense in depth: the UI already blocks changing an environment's
+        // URL without this confirmation, but the crawler now clicks things
+        // and attempts logins on whatever URL is configured here, so the job
+        // itself must not trust that the UI path was the only way this
+        // environment's URL got set.
+        if (! $environment->hasAuthorizedTarget()) {
+            $this->markFailed('Aucune autorisation confirmée pour cette cible — confirmez dans Réglages environnement avant de lancer une exécution.');
 
             return;
         }
@@ -166,9 +178,7 @@ class RunWorkflow implements ShouldQueue
 
     protected function normalizeUrl(string $url): string
     {
-        return str_starts_with($url, 'http://') || str_starts_with($url, 'https://')
-            ? $url
-            : 'https://'.$url;
+        return UrlHost::normalize($url);
     }
 
     /**

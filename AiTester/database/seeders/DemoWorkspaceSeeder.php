@@ -10,6 +10,7 @@ use App\Models\AppGraphNode;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Workflow;
+use App\Support\UrlHost;
 use Illuminate\Database\Seeder;
 
 class DemoWorkspaceSeeder extends Seeder
@@ -37,6 +38,8 @@ class DemoWorkspaceSeeder extends Seeder
         $project->environments()->first()?->update([
             'name' => 'staging',
             'url' => 'staging.facturly.app',
+            'target_authorized_at' => now(),
+            'target_authorized_host' => UrlHost::of('staging.facturly.app'),
         ]);
 
         $this->seedActiveWorkflows($project);

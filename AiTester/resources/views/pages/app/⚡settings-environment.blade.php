@@ -2,8 +2,10 @@
 
 use App\Models\Environment;
 use App\Models\Project;
+use App\Support\UrlHost;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -19,6 +21,8 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
 
     public string $password = '';
 
+    public bool $targetAuthorized = false;
+
     public function mount(): void
     {
         $this->project = Auth::user()->currentProject();
@@ -32,15 +36,55 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
         $this->username = $this->environment->username ?? '';
     }
 
+    /**
+     * True once the URL field points at a different host than whatever is
+     * already authorized — the crawler clicks things and attempts logins on
+     * this URL, so a fresh domain needs a fresh confirmation, but an unchanged
+     * one shouldn't force the user to re-tick the box every time they save.
+     */
+    #[Computed]
+    public function needsAuthorizationConfirmation(): bool
+    {
+        if (! $this->environment->hasAuthorizedTarget()) {
+            return $this->url !== '';
+        }
+
+        return UrlHost::of($this->url) !== UrlHost::of($this->environment->url);
+    }
+
     public function save(): void
     {
         $this->authorize('view', $this->project);
 
         $this->validate([
-            'url' => 'nullable|string|max:255',
+            // discovery.blade.php's launchDiscovery() already refuses to crawl the
+            // app's own host — this is the same check for the other place an
+            // environment's url can be set, closed by a UrlHost::of() comparison
+            // (host-only, case-insensitive) rather than raw string equality.
+            'url' => ['nullable', 'string', 'max:255', function ($attribute, $value, $fail) {
+                if ($value === '') {
+                    return;
+                }
+
+                $host = UrlHost::of($value);
+                $blockedHosts = array_filter([
+                    UrlHost::of((string) config('app.url')),
+                    UrlHost::of(request()->getHost()),
+                ]);
+
+                if ($host && in_array($host, $blockedHosts, true)) {
+                    $fail(__("Impossible de cibler l'application elle-même."));
+                }
+            }],
             'username' => 'nullable|string|max:255',
             'password' => 'nullable|string|max:255',
         ]);
+
+        if ($this->needsAuthorizationConfirmation && ! $this->targetAuthorized) {
+            $this->addError('targetAuthorized', __("Confirmez que vous êtes autorisé à tester ce site avant d'enregistrer."));
+
+            return;
+        }
 
         $this->environment->update([
             'url' => $this->url !== '' ? $this->url : null,
@@ -49,9 +93,13 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
             // blank submit must not be read as "the user wants no password."
             'username' => $this->username !== '' ? $this->username : $this->environment->username,
             'password' => $this->password !== '' ? $this->password : $this->environment->password,
+            'target_authorized_at' => $this->needsAuthorizationConfirmation ? now() : $this->environment->target_authorized_at,
+            'target_authorized_host' => $this->needsAuthorizationConfirmation ? UrlHost::of($this->url) : $this->environment->target_authorized_host,
         ]);
 
         $this->password = '';
+        $this->targetAuthorized = false;
+        unset($this->needsAuthorizationConfirmation);
 
         Flux::toast(variant: 'success', text: __('Réglages environnement enregistrés.'));
     }
@@ -100,6 +148,20 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
             <p class="-mt-2 text-[11px] text-at-muted">
                 {{ __('Chiffrés au repos, jamais journalisés.') }}
             </p>
+
+            @if ($this->needsAuthorizationConfirmation)
+                <label class="flex items-start gap-2 rounded-[9px] border border-at-border-2 bg-at-bg px-3 py-2.5 text-[12px] text-at-text-2">
+                    <input type="checkbox" wire:model="targetAuthorized" class="mt-0.5" />
+                    <span>{{ __("Je certifie être propriétaire de ce site, ou autorisé par son propriétaire à y lancer des explorations et tests automatisés (navigation, clics, tentatives de connexion).") }}</span>
+                </label>
+                @error('targetAuthorized')
+                    <div class="-mt-2 text-[11.5px] text-verdict-broken">{{ $message }}</div>
+                @enderror
+            @elseif ($environment->target_authorized_at)
+                <p class="-mt-2 text-[11px] text-at-muted">
+                    {{ __('Autorisation confirmée le :date.', ['date' => $environment->target_authorized_at->format('d/m/Y')]) }}
+                </p>
+            @endif
 
             <button
                 type="submit"

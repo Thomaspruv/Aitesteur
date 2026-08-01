@@ -31,7 +31,7 @@ function projectWithAi(User $user)
 {
     $project = $user->currentProject();
     $project->update(['ai_provider' => AiProvider::DeepSeek, 'ai_model' => 'deepseek-chat', 'ai_api_key' => 'sk-test']);
-    $project->primaryEnvironment()->update(['url' => 'https://example.com']);
+    $project->primaryEnvironment()->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     return $project;
 }
@@ -181,7 +181,7 @@ test('a screenshot is decoded and stored on the public disk', function () {
 test('a run fails cleanly when the project has no AI configured', function () {
     $user = User::factory()->create();
     $project = $user->currentProject();
-    $project->primaryEnvironment()->update(['url' => 'https://example.com']);
+    $project->primaryEnvironment()->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
 
     $workflow = Workflow::factory()->create(['project_id' => $project->id]);
     $run = $workflow->runs()->create(['status' => RunStatus::Queued, 'triggered_by' => 'manual']);
@@ -209,6 +209,25 @@ test('blank step intents are filtered out before dispatching, and a workflow lef
 
     expect($run->fresh()->status)->toBe(RunStatus::Failed)
         ->and($run->fresh()->error)->toContain('aucune étape avec une intention');
+
+    Process::assertNothingRan();
+});
+
+test('a run against an unauthorized target fails cleanly without ever invoking the executor', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $project->update(['ai_provider' => AiProvider::DeepSeek, 'ai_model' => 'deepseek-chat', 'ai_api_key' => 'sk-test']);
+    $project->primaryEnvironment()->update(['url' => 'https://example.com']);
+
+    $workflow = Workflow::factory()->create(['project_id' => $project->id, 'status' => WorkflowStatus::Active]);
+    $run = $workflow->runs()->create(['status' => RunStatus::Queued, 'triggered_by' => 'manual']);
+
+    Process::fake();
+
+    (new RunWorkflow($run))->handle();
+
+    expect($run->fresh()->status)->toBe(RunStatus::Failed)
+        ->and($run->fresh()->error)->toContain('Aucune autorisation confirmée');
 
     Process::assertNothingRan();
 });
