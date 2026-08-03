@@ -3,19 +3,17 @@ name: tests
 on:
   push:
     branches:
-      - develop
       - main
-      - master
-      - workos
   pull_request:
     branches:
-      - develop
       - main
-      - master
-      - workos
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: AiTester
 
 jobs:
   ci:
@@ -45,6 +43,9 @@ jobs:
       - name: Install Node Dependencies
         run: npm i
 
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
       - name: Add Flux Credentials Loaded From ENV
         run: composer config http-basic.composer.fluxui.dev "${{ secrets.FLUX_USERNAME }}" "${{ secrets.FLUX_LICENSE_KEY }}"
 
@@ -63,5 +64,8 @@ jobs:
       - name: Run Type Analysis
         run: composer types:check
 
-      - name: Run Tests
+      - name: Run PHP Tests
         run: php artisan test
+
+      - name: Run Crawler Tests
+        run: npm test

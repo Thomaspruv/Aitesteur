@@ -3,19 +3,17 @@ name: linter
 on:
   push:
     branches:
-      - develop
       - main
-      - master
-      - workos
   pull_request:
     branches:
-      - develop
       - main
-      - master
-      - workos
 
 permissions:
   contents: write
+
+defaults:
+  run:
+    working-directory: AiTester
 
 jobs:
   quality:
@@ -40,12 +38,3 @@ jobs:
 
       - name: Run Pint
         run: composer lint
-
-      # - name: Commit Changes
-      #   uses: stefanzweifel/git-auto-commit-action@v7
-      #   with:
-      #     commit_message: fix code style
-      #     commit_options: '--no-verify'
-      #     file_pattern: |
-      #       **/*
-      #       !.github/workflows/*

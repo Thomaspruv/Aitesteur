@@ -45,11 +45,13 @@ function inIpv4Cidr(ip, cidr) {
     return (ipv4ToLong(ip) & mask) === (ipv4ToLong(range) & mask);
 }
 
-function isBlockedIpv4(ip) {
+// Exported (only) for direct unit testing — every other consumer in this
+// file goes through classifyHost()/assertPublicHost(), not these directly.
+export function isBlockedIpv4(ip) {
     return BLOCKED_IPV4_RANGES.some((cidr) => inIpv4Cidr(ip, cidr));
 }
 
-function isBlockedIpv6(ip) {
+export function isBlockedIpv6(ip) {
     const lower = ip.toLowerCase();
     return (
         lower === '::1' ||
