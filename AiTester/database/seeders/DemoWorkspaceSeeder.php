@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\Criticality;
+use App\Enums\RunStatus;
 use App\Enums\Verdict;
 use App\Enums\WorkflowOrigin;
 use App\Enums\WorkflowStatus;
@@ -67,7 +68,8 @@ class DemoWorkspaceSeeder extends Seeder
             ],
             'spark_data' => [10, 9, 11, 8, 10, 7, 9, 6, 8],
         ]);
-        $connexion->runs()->create(['verdict' => Verdict::Pass, 'escalation_level' => 0, 'triggered_by' => 'deploy', 'created_at' => now()->subMinutes(12)]);
+        $connexionRanAt = now()->subMinutes(12);
+        $connexion->runs()->create(['status' => RunStatus::Completed, 'verdict' => Verdict::Pass, 'escalation_level' => 0, 'triggered_by' => 'deploy', 'created_at' => $connexionRanAt, 'started_at' => $connexionRanAt, 'finished_at' => $connexionRanAt]);
 
         $invoice = Workflow::create([
             'project_id' => $project->id,
@@ -87,7 +89,8 @@ class DemoWorkspaceSeeder extends Seeder
             ],
             'spark_data' => [8, 12, 9, 13, 7, 10, 6, 9, 7],
         ]);
-        $invoice->runs()->create(['verdict' => Verdict::PassHealed, 'escalation_level' => 1, 'triggered_by' => 'deploy', 'created_at' => now()->subMinutes(34)]);
+        $invoiceRanAt = now()->subMinutes(34);
+        $invoice->runs()->create(['status' => RunStatus::Completed, 'verdict' => Verdict::PassHealed, 'escalation_level' => 1, 'triggered_by' => 'deploy', 'created_at' => $invoiceRanAt, 'started_at' => $invoiceRanAt, 'finished_at' => $invoiceRanAt]);
 
         foreach ([
             ['version' => 9, 'change_label' => 'Création initiale (grounding run)', 'days' => 28],
@@ -120,7 +123,8 @@ class DemoWorkspaceSeeder extends Seeder
             ],
             'spark_data' => [9, 8, 10, 7, 9, 12, 8, 10, 9],
         ]);
-        $checkoutRun = $checkout->runs()->create(['verdict' => Verdict::Changed, 'escalation_level' => 4, 'triggered_by' => 'deploy', 'created_at' => now()->subHour()]);
+        $checkoutRanAt = now()->subHour();
+        $checkoutRun = $checkout->runs()->create(['status' => RunStatus::Completed, 'verdict' => Verdict::Changed, 'escalation_level' => 4, 'triggered_by' => 'deploy', 'created_at' => $checkoutRanAt, 'started_at' => $checkoutRanAt, 'finished_at' => $checkoutRanAt]);
         $checkoutRun->update([
             'diagnostic_summary' => "L'étape « Envoyer » est maintenant dans un menu déroulant — parcours retrouvé par un chemin différent.",
         ]);
@@ -142,7 +146,8 @@ class DemoWorkspaceSeeder extends Seeder
             ],
             'spark_data' => [11, 9, 10, 9, 8, 9, 8, 9, 8],
         ]);
-        $invite->runs()->create(['verdict' => Verdict::Pass, 'escalation_level' => 0, 'triggered_by' => 'deploy', 'created_at' => now()->subHours(2)]);
+        $inviteRanAt = now()->subHours(2);
+        $invite->runs()->create(['status' => RunStatus::Completed, 'verdict' => Verdict::Pass, 'escalation_level' => 0, 'triggered_by' => 'deploy', 'created_at' => $inviteRanAt, 'started_at' => $inviteRanAt, 'finished_at' => $inviteRanAt]);
 
         $resetPassword = Workflow::create([
             'project_id' => $project->id,
@@ -163,7 +168,9 @@ class DemoWorkspaceSeeder extends Seeder
             ],
             'spark_data' => [8, 9, 8, 10, 9, 14, 15, 16, 17],
         ]);
+        $resetPasswordRanAt = now()->subHours(3);
         $brokenRun = $resetPassword->runs()->create([
+            'status' => RunStatus::Completed,
             'verdict' => Verdict::Broken,
             'escalation_level' => 3,
             'triggered_by' => 'deploy',
@@ -171,7 +178,9 @@ class DemoWorkspaceSeeder extends Seeder
             'expected_label' => 'baseline',
             'observed_label' => 'erreur 500',
             'diagnostic_summary' => 'La page affiche une erreur serveur — non réalisable autrement → régression confirmée.',
-            'created_at' => now()->subHours(3),
+            'created_at' => $resetPasswordRanAt,
+            'started_at' => $resetPasswordRanAt,
+            'finished_at' => $resetPasswordRanAt,
         ]);
         foreach ([
             ['intent' => 'Ouvrir la page de connexion', 'state' => Verdict::Pass],
@@ -203,7 +212,8 @@ class DemoWorkspaceSeeder extends Seeder
             ],
             'spark_data' => [10, 10, 9, 10, 9, 10, 9, 10, 9],
         ]);
-        $export->runs()->create(['verdict' => Verdict::Pass, 'escalation_level' => 0, 'triggered_by' => 'deploy', 'created_at' => now()->subHours(5)]);
+        $exportRanAt = now()->subHours(5);
+        $export->runs()->create(['status' => RunStatus::Completed, 'verdict' => Verdict::Pass, 'escalation_level' => 0, 'triggered_by' => 'deploy', 'created_at' => $exportRanAt, 'started_at' => $exportRanAt, 'finished_at' => $exportRanAt]);
     }
 
     protected function seedDiscoveryCandidates(Project $project): void
