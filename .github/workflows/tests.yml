@@ -20,7 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php-version: ['8.3', '8.4', '8.5']
+        # composer.lock currently locks symfony/* at versions requiring
+        # php >=8.4.1 (composer.json's own constraint above was ^8.3 until
+        # this was caught — first time this matrix ever actually ran), so
+        # 8.3 isn't really supported today regardless of what composer.json
+        # claims. Test what's actually installable.
+        php-version: ['8.4', '8.5']
 
     steps:
       - name: Checkout code
