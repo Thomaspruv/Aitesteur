@@ -24,7 +24,7 @@ class AppGraphTreeLayout
     /**
      * @param  Collection<int, AppGraphNode>  $nodes
      * @param  Collection<int, AppGraphEdge>  $edges
-     * @return array{nodes: array<int, array{node: AppGraphNode, x: float, y: float}>, edges: array<int, array{from: array{node: AppGraphNode, x: float, y: float}, to: array{node: AppGraphNode, x: float, y: float}}>, width: int, height: int}
+     * @return array{nodes: array<int, array{node: AppGraphNode, x: int|float, y: int|float}>, edges: array<int, array{from: array{node: AppGraphNode, x: int|float, y: int|float}, to: array{node: AppGraphNode, x: int|float, y: int|float}}>, width: int, height: int}
      */
     public static function build(Collection $nodes, Collection $edges): array
     {
@@ -95,10 +95,21 @@ class AppGraphTreeLayout
         };
         $assignSlot($root->id);
 
+        // ->get() rather than [$id]: every id here is sourced from $nodes
+        // itself (via $adjacency/$childrenOf, built from edges whose
+        // endpoints should always resolve back to a real node — but an
+        // orphaned AppGraphEdge row would otherwise crash the whole layout
+        // rather than just dropping the one dangling reference).
         $positions = [];
         foreach ($slot as $id => $slotValue) {
+            $node = $nodesById->get($id);
+
+            if (! $node) {
+                continue;
+            }
+
             $positions[$id] = [
-                'node' => $nodesById[$id],
+                'node' => $node,
                 'x' => self::PADDING + $slotValue * self::COL_WIDTH,
                 'y' => self::PADDING + $depthOf[$id] * self::LEVEL_HEIGHT,
             ];
@@ -107,6 +118,10 @@ class AppGraphTreeLayout
         $treeEdges = [];
         foreach ($childrenOf as $parentId => $children) {
             foreach ($children as $childId) {
+                if (! isset($positions[$parentId], $positions[$childId])) {
+                    continue;
+                }
+
                 $treeEdges[] = ['from' => $positions[$parentId], 'to' => $positions[$childId]];
             }
         }

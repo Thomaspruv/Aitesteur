@@ -97,7 +97,7 @@ class RunWorkflow implements ShouldQueue
         }
 
         $steps = collect($workflow->steps)
-            ->map(fn (array $step) => ['intent' => trim($step['intent'] ?? '')])
+            ->map(fn (array $step) => ['intent' => trim($step['intent'])])
             // A blank intent has nothing for the AI to act on — sending it
             // anyway wastes a real, billed API call and produces a confusing
             // "cant_find" diagnostic that never mentions the actual cause.
@@ -158,22 +158,84 @@ class RunWorkflow implements ShouldQueue
             return;
         }
 
-        $result = json_decode((string) file_get_contents($outputPath), true);
+        $decoded = json_decode((string) file_get_contents($outputPath), true);
         @unlink($outputPath);
 
-        if (! is_array($result) || empty($result['ok'])) {
-            $this->markFailed($result['error'] ?? $errorOutput ?? "Résultat d'exécution invalide.");
+        // $errorOutput is always a string (never null) by this point — both
+        // branches of the try/catch above assign one — but it can be empty
+        // when the process failed without writing to stderr, in which case
+        // it has nothing to show and the fallback message below should win.
+        // ?? wouldn't do that (an empty string isn't null), so this needs ?:.
+        if (! is_array($decoded) || empty($decoded['ok'])) {
+            $this->markFailed($decoded['error'] ?? ($errorOutput ?: "Résultat d'exécution invalide."));
 
             return;
         }
 
-        if (($result['verdict'] ?? null) === null) {
+        $result = $this->parseExecuteResult($decoded);
+
+        if ($result === null) {
+            $this->markFailed("Résultat d'exécution invalide.");
+
+            return;
+        }
+
+        $verdict = $result['verdict'];
+
+        if ($verdict === null) {
             $this->persistInterrupted($result, $errorOutput);
 
             return;
         }
 
-        $this->persist($result, $durationSeconds);
+        $this->persist($result, $verdict, $result['escalationLevel'] ?? 0, $durationSeconds);
+    }
+
+    /**
+     * json_decode() only proves $decoded is *an* array — not that it has the
+     * shape persist()/persistInterrupted() need. execute.mjs reliably
+     * produces this exact shape (see its own result initialization in
+     * main()), but that guarantee crosses a process/language boundary
+     * PHPStan can't see across, so this is what actually proves it rather
+     * than trusting it blindly — and, as a side effect, turns a malformed/
+     * drifted script response into a clean "invalid result" failure instead
+     * of a warning-then-TypeError partway through the DB transaction.
+     *
+     * @param  array<string, mixed>  $decoded
+     * @return array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, verdict: string|null, escalationLevel: int|null, authenticated: bool}|null
+     */
+    protected function parseExecuteResult(array $decoded): ?array
+    {
+        $steps = [];
+        foreach ((array) ($decoded['steps'] ?? null) as $step) {
+            if (! is_array($step) || ! is_string($step['intent'] ?? null) || ! is_string($step['state'] ?? null)) {
+                return null;
+            }
+
+            $steps[] = [
+                'intent' => $step['intent'],
+                'state' => $step['state'],
+                'screenshot' => is_string($step['screenshot'] ?? null) ? $step['screenshot'] : null,
+                'error' => is_string($step['error'] ?? null) ? $step['error'] : null,
+            ];
+        }
+
+        $verdict = $decoded['verdict'] ?? null;
+        if ($verdict !== null && ! is_string($verdict)) {
+            return null;
+        }
+
+        $escalationLevel = $decoded['escalationLevel'] ?? null;
+        if ($escalationLevel !== null && ! is_int($escalationLevel)) {
+            return null;
+        }
+
+        return [
+            'steps' => $steps,
+            'verdict' => $verdict,
+            'escalationLevel' => $escalationLevel,
+            'authenticated' => is_bool($decoded['authenticated'] ?? null) ? $decoded['authenticated'] : false,
+        ];
     }
 
     protected function normalizeUrl(string $url): string
@@ -204,7 +266,7 @@ class RunWorkflow implements ShouldQueue
      * than discarding them via markFailed() — keeps a record of real actions
      * already taken on the live site, so a retry doesn't blindly repeat them.
      *
-     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>}  $result
+     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, authenticated: bool}  $result
      */
     protected function persistInterrupted(array $result, ?string $errorOutput): void
     {
@@ -215,7 +277,7 @@ class RunWorkflow implements ShouldQueue
 
             $this->run->update([
                 'status' => RunStatus::Failed,
-                'authenticated' => $result['authenticated'] ?? null,
+                'authenticated' => $result['authenticated'],
                 'error' => str("Le run a été interrompu après {$completed} étape(s) exécutée(s) (délai dépassé). ".($errorOutput ?? ''))->limit(500)->toString(),
                 'finished_at' => now(),
             ]);
@@ -223,26 +285,26 @@ class RunWorkflow implements ShouldQueue
     }
 
     /**
-     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, verdict: string, escalationLevel: int, authenticated?: bool}  $result
+     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, authenticated: bool}  $result
      */
-    protected function persist(array $result, int $durationSeconds): void
+    protected function persist(array $result, string $verdict, int $escalationLevel, int $durationSeconds): void
     {
-        DB::transaction(function () use ($result, $durationSeconds) {
+        DB::transaction(function () use ($result, $verdict, $escalationLevel, $durationSeconds) {
             $workflow = $this->run->workflow;
 
             $firstBroken = collect($result['steps'])->firstWhere('state', 'BROKEN');
 
             $this->createRunSteps($result['steps']);
 
-            $verdict = Verdict::from($result['verdict']);
+            $resolvedVerdict = Verdict::from($verdict);
 
             $this->run->update([
                 'status' => RunStatus::Completed,
-                'verdict' => $verdict,
-                'escalation_level' => $result['escalationLevel'],
-                'authenticated' => $result['authenticated'] ?? false,
+                'verdict' => $resolvedVerdict,
+                'escalation_level' => $escalationLevel,
+                'authenticated' => $result['authenticated'],
                 'expected_label' => $firstBroken ? 'étape réussie' : null,
-                'observed_label' => $firstBroken ? 'échec : '.($firstBroken['intent'] ?? '') : null,
+                'observed_label' => $firstBroken ? 'échec : '.$firstBroken['intent'] : null,
                 'diagnostic_summary' => $firstBroken['error'] ?? null,
                 'finished_at' => now(),
             ]);
@@ -254,13 +316,13 @@ class RunWorkflow implements ShouldQueue
                 ->all();
 
             $workflow->update([
-                'latest_verdict' => $verdict,
+                'latest_verdict' => $resolvedVerdict,
                 'last_run_at' => now(),
                 'spark_data' => $spark,
                 // Closes the "Vérifié par replay" promise on Discovery's candidate
                 // cards — a candidate is only marked verified once it has actually
                 // been replayed successfully, not just proposed by the crawler.
-                'verified' => $workflow->status === WorkflowStatus::Candidate && in_array($verdict, [Verdict::Pass, Verdict::PassHealed], true)
+                'verified' => $workflow->status === WorkflowStatus::Candidate && in_array($resolvedVerdict, [Verdict::Pass, Verdict::PassHealed], true)
                     ? true
                     : $workflow->verified,
             ]);

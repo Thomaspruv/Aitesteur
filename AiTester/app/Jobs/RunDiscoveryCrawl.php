@@ -118,11 +118,19 @@ class RunDiscoveryCrawl implements ShouldQueue
             return;
         }
 
-        $result = json_decode((string) file_get_contents($outputPath), true);
+        $decoded = json_decode((string) file_get_contents($outputPath), true);
         @unlink($outputPath);
 
-        if (! is_array($result) || empty($result['ok'])) {
-            $this->markFailed($result['error'] ?? 'Résultat de crawl invalide.');
+        if (! is_array($decoded) || empty($decoded['ok'])) {
+            $this->markFailed($decoded['error'] ?? 'Résultat de crawl invalide.');
+
+            return;
+        }
+
+        $result = $this->parseCrawlResult($decoded);
+
+        if ($result === null) {
+            $this->markFailed('Résultat de crawl invalide.');
 
             return;
         }
@@ -136,7 +144,86 @@ class RunDiscoveryCrawl implements ShouldQueue
     }
 
     /**
-     * @param  array{nodes: array<int, array{key: string, heading: string|null, url: string|null, kind: string, x: int, y: int, screenshot?: string|null}>, edges: array<int, array{from: string, to: string}>, formPages: array<int, array{title: string, url: string, heading: string|null, fields: array<int, string>}>, loginFormDetected: bool, registerFormDetected: bool, pagesVisited: int, authenticated?: bool}  $result
+     * json_decode() only proves $decoded is *an* array — not that it has the
+     * shape persist() needs. crawl.mjs reliably produces this exact shape
+     * (see its own result initialization in main()), but that guarantee
+     * crosses a process/language boundary PHPStan can't see across, so this
+     * is what actually proves it rather than trusting it blindly — and, as a
+     * side effect, turns a malformed/drifted crawler response into a clean
+     * "invalid result" failure instead of a warning-then-TypeError partway
+     * through the DB transaction in persist().
+     *
+     * @param  array<string, mixed>  $decoded
+     * @return array{nodes: array<int, array{key: string, heading: string|null, url: string|null, kind: string, x: int, y: int, screenshot?: string|null}>, edges: array<int, array{from: string, to: string}>, formPages: array<int, array{title: string, url: string, heading: string|null, fields: array<int, string>}>, loginFormDetected: bool, registerFormDetected: bool, pagesVisited: int, authenticated: bool}|null
+     */
+    protected function parseCrawlResult(array $decoded): ?array
+    {
+        $nodes = [];
+        foreach ((array) ($decoded['nodes'] ?? null) as $node) {
+            if (! is_array($node) || ! is_string($node['key'] ?? null) || ! is_string($node['kind'] ?? null) || ! is_int($node['x'] ?? null) || ! is_int($node['y'] ?? null)) {
+                return null;
+            }
+
+            $nodes[] = [
+                'key' => $node['key'],
+                'heading' => is_string($node['heading'] ?? null) ? $node['heading'] : null,
+                'url' => is_string($node['url'] ?? null) ? $node['url'] : null,
+                'kind' => $node['kind'],
+                'x' => $node['x'],
+                'y' => $node['y'],
+                'screenshot' => is_string($node['screenshot'] ?? null) ? $node['screenshot'] : null,
+            ];
+        }
+
+        $edges = [];
+        foreach ((array) ($decoded['edges'] ?? null) as $edge) {
+            if (! is_array($edge) || ! is_string($edge['from'] ?? null) || ! is_string($edge['to'] ?? null)) {
+                return null;
+            }
+
+            $edges[] = ['from' => $edge['from'], 'to' => $edge['to']];
+        }
+
+        $formPages = [];
+        foreach ((array) ($decoded['formPages'] ?? null) as $formPage) {
+            if (! is_array($formPage) || ! is_string($formPage['title'] ?? null) || ! is_string($formPage['url'] ?? null)) {
+                return null;
+            }
+
+            $fields = [];
+            foreach ((array) ($formPage['fields'] ?? null) as $field) {
+                if (! is_string($field)) {
+                    return null;
+                }
+
+                $fields[] = $field;
+            }
+
+            $formPages[] = [
+                'title' => $formPage['title'],
+                'url' => $formPage['url'],
+                'heading' => is_string($formPage['heading'] ?? null) ? $formPage['heading'] : null,
+                'fields' => $fields,
+            ];
+        }
+
+        if (! is_bool($decoded['loginFormDetected'] ?? null) || ! is_bool($decoded['registerFormDetected'] ?? null) || ! is_int($decoded['pagesVisited'] ?? null)) {
+            return null;
+        }
+
+        return [
+            'nodes' => $nodes,
+            'edges' => $edges,
+            'formPages' => $formPages,
+            'loginFormDetected' => $decoded['loginFormDetected'],
+            'registerFormDetected' => $decoded['registerFormDetected'],
+            'pagesVisited' => $decoded['pagesVisited'],
+            'authenticated' => is_bool($decoded['authenticated'] ?? null) ? $decoded['authenticated'] : false,
+        ];
+    }
+
+    /**
+     * @param  array{nodes: array<int, array{key: string, heading: string|null, url: string|null, kind: string, x: int, y: int, screenshot?: string|null}>, edges: array<int, array{from: string, to: string}>, formPages: array<int, array{title: string, url: string, heading: string|null, fields: array<int, string>}>, loginFormDetected: bool, registerFormDetected: bool, pagesVisited: int, authenticated: bool}  $result
      */
     protected function persist(array $result): void
     {
@@ -224,7 +311,7 @@ class RunDiscoveryCrawl implements ShouldQueue
                 'status' => DiscoveryRunStatus::Completed,
                 'pages_visited' => $result['pagesVisited'],
                 'candidates_created' => $candidatesCreated,
-                'authenticated' => $result['authenticated'] ?? false,
+                'authenticated' => $result['authenticated'],
                 'login_form_detected' => $result['loginFormDetected'],
                 'register_form_detected' => $result['registerFormDetected'],
                 'forms_found' => count($result['formPages'])
@@ -243,6 +330,7 @@ class RunDiscoveryCrawl implements ShouldQueue
 
     /**
      * @param  array{key: string, heading: string|null, url: string|null, kind: string, x: int, y: int}  $node
+     * @param  Collection<array-key, int>  $headingCounts
      */
     protected function nodeLabel(array $node, Collection $headingCounts): string
     {
@@ -294,7 +382,7 @@ class RunDiscoveryCrawl implements ShouldQueue
 
     /**
      * @param  array{formPages: array<int, array{title: string, url: string, heading: string|null, fields: array<int, string>}>, loginFormDetected: bool, registerFormDetected: bool}  $result
-     * @return array<int, array{name: string, criticality: string, canary: bool, score: int, verified: bool, steps: array}>
+     * @return array<int, array{name: string, criticality: string, canary: bool, score: int, verified: bool, discovery_url: string|null, steps: array<int, array{intent: string, assertions: array<int, array{label: string, on: bool}>}>}>
      */
     protected function buildCandidates(array $result, Project $project): array
     {
@@ -343,7 +431,7 @@ class RunDiscoveryCrawl implements ShouldQueue
      * URL path so pages with an identical <title> don't collide.
      *
      * @param  array<int, array{title: string, url: string, heading: string|null, fields: array<int, string>}>  $formPages
-     * @return array<int, array{name: string, criticality: string, canary: bool, score: int, verified: bool, steps: array}>
+     * @return array<int, array{name: string, criticality: string, canary: bool, score: int, verified: bool, discovery_url: string|null, steps: array<int, array{intent: string, assertions: array<int, array{label: string, on: bool}>}>}>
      */
     protected function buildFormCandidates(array $formPages, ?AiClient $aiClient): array
     {
