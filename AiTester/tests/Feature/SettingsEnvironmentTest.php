@@ -66,9 +66,10 @@ test('resubmitting with a blank password does not wipe the existing one', functi
 test('resaving the same host does not require re-confirming authorization', function () {
     $user = User::factory()->create();
     $project = $user->currentProject();
+    $originalAuthorizedAt = now()->subDay();
     $project->primaryEnvironment()->update([
         'url' => 'https://staging.example.com',
-        'target_authorized_at' => now()->subDay(),
+        'target_authorized_at' => $originalAuthorizedAt,
         'target_authorized_host' => 'staging.example.com',
     ]);
 
@@ -79,7 +80,33 @@ test('resaving the same host does not require re-confirming authorization', func
         ->call('save')
         ->assertHasNoErrors();
 
-    expect($project->primaryEnvironment()->refresh()->username)->toBe('demo');
+    $environment = $project->primaryEnvironment()->refresh();
+
+    // Not just "no error" — the stored authorization must be genuinely left
+    // alone (not silently refreshed to now()), otherwise a regression that
+    // always re-stamps on save would pass this test undetected.
+    expect($environment->username)->toBe('demo')
+        ->and($environment->target_authorized_at->timestamp)->toBe($originalAuthorizedAt->timestamp)
+        ->and($environment->target_authorized_host)->toBe('staging.example.com');
+});
+
+test('clearing an already-authorized url does not require re-confirming authorization', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $project->primaryEnvironment()->update([
+        'url' => 'https://staging.example.com',
+        'target_authorized_at' => now(),
+        'target_authorized_host' => 'staging.example.com',
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('pages::app.settings-environment')
+        ->set('url', '')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($project->primaryEnvironment()->refresh()->url)->toBeNull();
 });
 
 test('it creates a primary environment on the fly if none exists yet', function () {

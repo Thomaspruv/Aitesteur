@@ -85,21 +85,16 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
     }
 
     /**
-     * True once the URL field points at a different host than whatever is
-     * already authorized for this project's environment — mirrors the same
-     * check in settings-environment, since launching a discovery here can
-     * change that environment's URL too (see launchDiscovery() below).
+     * Delegates to Environment::needsReauthorizationFor() — the project has
+     * no environment yet only in the brief window before launchDiscovery()
+     * creates one (see there), in which case any non-blank URL needs
+     * confirmation, same as a freshly-provisioned environment would.
      */
     #[Computed]
     public function needsAuthorizationConfirmation(): bool
     {
-        $environment = $this->project?->primaryEnvironment();
-
-        if (! $environment?->hasAuthorizedTarget()) {
-            return $this->crawlUrl !== '';
-        }
-
-        return UrlHost::of($this->crawlUrl) !== UrlHost::of($environment->url);
+        return $this->project?->primaryEnvironment()?->needsReauthorizationFor($this->crawlUrl)
+            ?? ($this->crawlUrl !== '');
     }
 
     #[Computed]

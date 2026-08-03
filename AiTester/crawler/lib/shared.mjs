@@ -60,28 +60,66 @@ function isBlockedIpv6(ip) {
     );
 }
 
-async function resolveIsHostPublic(hostname) {
+// A bracketed IPv6 literal (e.g. "[::1]", as URL.hostname keeps it) makes
+// dns.lookup() throw ENOTFOUND — it only recognizes a bare address. Stripping
+// the brackets first is what lets a legitimate public IPv6 target/redirect
+// resolve correctly instead of being misreported as unresolvable/blocked.
+function stripIpv6Brackets(hostname) {
+    return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+}
+
+// 'public' | 'private' | 'unresolvable' — kept as three distinct outcomes
+// (rather than a boolean) so assertPublicHost can report which one actually
+// happened: a typo'd/not-yet-propagated hostname and an actual SSRF block are
+// different problems for the user to act on, and collapsing them into one
+// generic "non autorisée" message hid that distinction.
+async function classifyHost(hostname) {
     let address, family;
     try {
-        ({ address, family } = await lookup(hostname));
+        ({ address, family } = await lookup(stripIpv6Brackets(hostname)));
     } catch {
-        return false;
+        return 'unresolvable';
     }
 
-    return family === 6 ? !isBlockedIpv6(address) : !isBlockedIpv4(address);
+    const blocked = family === 6 ? isBlockedIpv6(address) : isBlockedIpv4(address);
+
+    return blocked ? 'private' : 'public';
+}
+
+async function resolveIsHostPublic(hostname) {
+    return (await classifyHost(hostname)) === 'public';
 }
 
 export async function assertPublicHost(hostname) {
-    if (!(await resolveIsHostPublic(hostname))) {
-        throw new Error(`Cible non autorisée : ${hostname} est introuvable ou pointe vers une adresse réseau privée ou interne.`);
+    const classification = await classifyHost(hostname);
+
+    if (classification === 'unresolvable') {
+        throw new Error(`Impossible de résoudre l'hôte : ${hostname}`);
+    }
+
+    if (classification === 'private') {
+        throw new Error(`Cible non autorisée : ${hostname} pointe vers une adresse réseau privée ou interne.`);
     }
 }
+
+// How long a per-hostname public/private verdict is trusted before
+// re-resolving. A redirect chain or a busy page can reference the same host
+// dozens of times in a row, so caching at all still matters for latency — but
+// caching for the crawl/run's *entire* remaining duration (up to ~3 min for
+// discovery, ~900s for a workflow run) would hand a DNS-rebinding attacker
+// that whole window to flip a hostname's record after its first, legitimate
+// resolution. A few seconds keeps the common case (many requests to the same
+// host in a tight loop) cheap while keeping the rebinding window short. The
+// context.on('response') backstop below still catches an attack that lands
+// inside this window — this cap is about narrowing exposure, not the only
+// thing standing between a rebind and a real connection.
+const HOST_VERDICT_TTL_MS = 5000;
 
 // Installs the guard described above on a BrowserContext — covers the main
 // page and any popup opened within it (context.on('page') captures don't get
 // their own route() call anywhere, so this is the only thing standing between
-// a popup and an internal address). Results are cached per-hostname for the
-// life of the context: a redirect chain or a busy page can reference the same
+// a popup and an internal address). Results are cached per-hostname, each for
+// HOST_VERDICT_TTL_MS: a redirect chain or a busy page can reference the same
 // host dozens of times, and re-running a DNS lookup for each would add real
 // latency for no additional safety.
 //
@@ -104,15 +142,17 @@ export async function assertPublicHost(hostname) {
 //     after its own try/catch, since a rejection deep in click-exploration
 //     can otherwise get swallowed by that code's own resilience catches.
 export async function installPrivateNetworkGuard(context) {
-    const isPublicByHostname = new Map();
+    const verdictByHostname = new Map(); // hostname -> { isPublic, checkedAt }
     const guardState = { blockedAddress: null };
 
     async function isHostPublic(hostname) {
-        let isPublic = isPublicByHostname.get(hostname);
-        if (isPublic === undefined) {
-            isPublic = await resolveIsHostPublic(hostname);
-            isPublicByHostname.set(hostname, isPublic);
+        const cached = verdictByHostname.get(hostname);
+        if (cached && Date.now() - cached.checkedAt < HOST_VERDICT_TTL_MS) {
+            return cached.isPublic;
         }
+
+        const isPublic = await resolveIsHostPublic(hostname);
+        verdictByHostname.set(hostname, { isPublic, checkedAt: Date.now() });
         return isPublic;
     }
 

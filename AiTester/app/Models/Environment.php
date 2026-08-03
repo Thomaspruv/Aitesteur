@@ -66,4 +66,45 @@ class Environment extends Model
             && $this->target_authorized_host !== null
             && $this->target_authorized_host === UrlHost::of($this->url);
     }
+
+    /**
+     * Whether confirming authorization is required before persisting
+     * $candidateUrl as this environment's new target — the single source of
+     * truth for the discovery/settings-environment screens' identical
+     * checkbox-gating logic.
+     *
+     * A blank candidate is never gated: there's no target being proposed to
+     * test, so certifying "I'm authorized to test this site" makes no sense
+     * for it (this also covers clearing an already-authorized url back out —
+     * that's a removal, not a new target needing sign-off).
+     */
+    public function needsReauthorizationFor(?string $candidateUrl): bool
+    {
+        if (! $candidateUrl) {
+            return false;
+        }
+
+        if (! $this->hasAuthorizedTarget()) {
+            return true;
+        }
+
+        return UrlHost::of($candidateUrl) !== $this->target_authorized_host;
+    }
+
+    /**
+     * Null when this environment's current target is authorized; otherwise
+     * the French failure message discovery/execution jobs should fail with.
+     * $actionLabel is the only thing that differs between call sites (e.g.
+     * "une découverte" vs "une exécution") — keeping the rest of the message
+     * here means a wording change never needs to be applied in more than
+     * one place.
+     */
+    public function authorizationFailureMessage(string $actionLabel): ?string
+    {
+        if ($this->hasAuthorizedTarget()) {
+            return null;
+        }
+
+        return "Aucune autorisation confirmée pour cette cible — confirmez dans Réglages environnement avant de lancer {$actionLabel}.";
+    }
 }

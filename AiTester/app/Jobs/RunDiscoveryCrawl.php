@@ -87,8 +87,8 @@ class RunDiscoveryCrawl implements ShouldQueue
         // and attempts logins on whatever URL is configured here, so the job
         // itself must not trust that the UI path was the only way this
         // environment's URL got set.
-        if (! $environment->hasAuthorizedTarget()) {
-            $this->markFailed('Aucune autorisation confirmée pour cette cible — confirmez dans Réglages environnement avant de lancer une découverte.');
+        if ($message = $environment->authorizationFailureMessage('une découverte')) {
+            $this->markFailed($message);
 
             return;
         }

@@ -36,20 +36,10 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
         $this->username = $this->environment->username ?? '';
     }
 
-    /**
-     * True once the URL field points at a different host than whatever is
-     * already authorized — the crawler clicks things and attempts logins on
-     * this URL, so a fresh domain needs a fresh confirmation, but an unchanged
-     * one shouldn't force the user to re-tick the box every time they save.
-     */
     #[Computed]
     public function needsAuthorizationConfirmation(): bool
     {
-        if (! $this->environment->hasAuthorizedTarget()) {
-            return $this->url !== '';
-        }
-
-        return UrlHost::of($this->url) !== UrlHost::of($this->environment->url);
+        return $this->environment->needsReauthorizationFor($this->url);
     }
 
     public function save(): void
