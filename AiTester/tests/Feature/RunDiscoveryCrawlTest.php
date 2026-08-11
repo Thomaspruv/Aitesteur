@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\AiProvider;
+use App\Enums\AiUsageFeature;
 use App\Enums\Criticality;
 use App\Enums\DiscoveryRunStatus;
 use App\Enums\WorkflowOrigin;
 use App\Enums\WorkflowStatus;
 use App\Jobs\RunDiscoveryCrawl;
+use App\Models\AiUsageEvent;
 use App\Models\DiscoveryRun;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
@@ -347,6 +349,55 @@ test('form pages are named by the ai annotator when the project has one configur
 
     expect($workflow->name)->toBe('Mettre à jour la facturation')
         ->and($workflow->criticality->value)->toBe('P1');
+});
+
+test('the annotator ai call records an AiUsageEvent attributed to the discovery run', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $project->update(['ai_provider' => AiProvider::DeepSeek, 'ai_model' => 'deepseek-chat', 'ai_api_key' => 'sk-test']);
+    $environment = $project->environments()->first();
+    $environment->update(['url' => 'https://example.com', 'target_authorized_at' => now(), 'target_authorized_host' => 'example.com']);
+
+    Http::fake([
+        'api.deepseek.com/*' => Http::response([
+            'choices' => [[
+                'message' => ['content' => json_encode([
+                    'pages' => [
+                        ['url' => 'https://example.com/settings/billing', 'name' => 'Mettre à jour la facturation', 'criticality' => 'P1'],
+                    ],
+                ])],
+            ]],
+            'usage' => ['prompt_tokens' => 500, 'completion_tokens' => 40],
+        ]),
+    ]);
+
+    $discoveryRun = DiscoveryRun::factory()->create([
+        'project_id' => $project->id,
+        'environment_id' => $environment->id,
+    ]);
+
+    fakeCrawlOutput(fn () => [
+        'ok' => true,
+        'nodes' => [],
+        'edges' => [],
+        'formPages' => [
+            ['title' => 'App', 'url' => 'https://example.com/settings/billing', 'heading' => 'Facturation', 'fields' => ['card_number']],
+        ],
+        'loginFormDetected' => false,
+        'registerFormDetected' => false,
+        'pagesVisited' => 1,
+        'authenticated' => false,
+        'error' => null,
+    ]);
+
+    (new RunDiscoveryCrawl($discoveryRun))->handle();
+
+    $event = AiUsageEvent::query()->where('discovery_run_id', $discoveryRun->id)->sole();
+
+    expect($event->project_id)->toBe($project->id)
+        ->and($event->feature)->toBe(AiUsageFeature::DiscoveryAnnotation)
+        ->and($event->prompt_tokens)->toBe(500)
+        ->and($event->completion_tokens)->toBe(40);
 });
 
 test('a crawl error marks the discovery run as failed', function () {

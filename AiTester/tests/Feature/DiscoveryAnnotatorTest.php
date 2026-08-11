@@ -3,6 +3,7 @@
 use App\Contracts\AiClient;
 use App\Exceptions\AiClientException;
 use App\Services\Ai\DiscoveryAnnotator;
+use App\Support\AiUsage;
 
 function fakeAnnotatorClient(array $response): AiClient
 {
@@ -13,6 +14,11 @@ function fakeAnnotatorClient(array $response): AiClient
         public function chatJson(string $systemPrompt, string $userPrompt): array
         {
             return $this->response;
+        }
+
+        public function lastUsage(): ?AiUsage
+        {
+            return null;
         }
     };
 }

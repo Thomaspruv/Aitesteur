@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Contracts\AiClient;
+use App\Enums\AiUsageFeature;
 use App\Enums\Criticality;
 use App\Enums\DiscoveryRunStatus;
 use App\Enums\WorkflowOrigin;
@@ -12,6 +13,7 @@ use App\Models\AppGraphNode;
 use App\Models\DiscoveryRun;
 use App\Models\Project;
 use App\Services\Ai\DiscoveryAnnotator;
+use App\Services\Ai\UsageRecordingAiClient;
 use App\Support\UrlHost;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -227,9 +229,17 @@ class RunDiscoveryCrawl implements ShouldQueue
      */
     protected function persist(array $result): void
     {
-        DB::transaction(function () use ($result) {
-            $project = $this->discoveryRun->project;
+        $project = $this->discoveryRun->project;
 
+        // Computed outside the transaction below on purpose: buildCandidates()
+        // may call out to the AI provider (buildFormCandidates() ->
+        // DiscoveryAnnotator), and that HTTP round-trip has no business
+        // holding open DB locks. It also means a later failure inside the
+        // transaction can no longer roll back the AiUsageEvent row for
+        // tokens DeepSeek already billed regardless of what happens next.
+        $candidates = $this->buildCandidates($result, $project);
+
+        DB::transaction(function () use ($result, $project, $candidates) {
             $project->appGraphEdges()->delete();
             $project->appGraphNodes()->delete();
 
@@ -266,8 +276,6 @@ class RunDiscoveryCrawl implements ShouldQueue
                     'to_node_id' => $nodesByKey[$edge['to']]->id,
                 ]);
             }
-
-            $candidates = $this->buildCandidates($result, $project);
 
             // Dedup by source page URL when a candidate has one (form pages) — the
             // generated name can legitimately change between runs (AI naming isn't
@@ -420,7 +428,23 @@ class RunDiscoveryCrawl implements ShouldQueue
             ];
         }
 
-        return [...$candidates, ...$this->buildFormCandidates($result['formPages'], $project->aiClient())];
+        return [...$candidates, ...$this->buildFormCandidates($result['formPages'], $this->trackedAiClient($project))];
+    }
+
+    protected function trackedAiClient(Project $project): ?AiClient
+    {
+        $client = $project->aiClient();
+
+        if (! $client) {
+            return null;
+        }
+
+        return new UsageRecordingAiClient(
+            inner: $client,
+            project: $project,
+            feature: AiUsageFeature::DiscoveryAnnotation,
+            discoveryRun: $this->discoveryRun,
+        );
     }
 
     /**

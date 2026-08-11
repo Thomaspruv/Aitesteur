@@ -67,6 +67,14 @@ class Run extends Model
         return $this->hasMany(RunStep::class)->orderBy('position');
     }
 
+    /**
+     * @return HasMany<AiUsageEvent, $this>
+     */
+    public function aiUsageEvents(): HasMany
+    {
+        return $this->hasMany(AiUsageEvent::class);
+    }
+
     public function isInProgress(): bool
     {
         return in_array($this->status, [RunStatus::Queued, RunStatus::Running], true);

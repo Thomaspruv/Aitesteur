@@ -93,6 +93,14 @@ class Project extends Model
         return $this->hasMany(DiscoveryRun::class);
     }
 
+    /**
+     * @return HasMany<AiUsageEvent, $this>
+     */
+    public function aiUsageEvents(): HasMany
+    {
+        return $this->hasMany(AiUsageEvent::class);
+    }
+
     public function primaryEnvironment(): ?Environment
     {
         return $this->environments()->first();

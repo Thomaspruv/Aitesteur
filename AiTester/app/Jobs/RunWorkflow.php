@@ -2,11 +2,14 @@
 
 namespace App\Jobs;
 
+use App\Enums\AiUsageFeature;
 use App\Enums\RunStatus;
 use App\Enums\Verdict;
 use App\Enums\WorkflowStatus;
 use App\Models\Run;
 use App\Models\RunStep;
+use App\Services\Ai\AiUsageRecorder;
+use App\Support\AiUsage;
 use App\Support\UrlHost;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -202,7 +205,7 @@ class RunWorkflow implements ShouldQueue
      * of a warning-then-TypeError partway through the DB transaction.
      *
      * @param  array<string, mixed>  $decoded
-     * @return array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, verdict: string|null, escalationLevel: int|null, authenticated: bool}|null
+     * @return array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null, usage: array{promptTokens: int, completionTokens: int}|null}>, verdict: string|null, escalationLevel: int|null, authenticated: bool, aiModel: string|null}|null
      */
     protected function parseExecuteResult(array $decoded): ?array
     {
@@ -217,6 +220,7 @@ class RunWorkflow implements ShouldQueue
                 'state' => $step['state'],
                 'screenshot' => is_string($step['screenshot'] ?? null) ? $step['screenshot'] : null,
                 'error' => is_string($step['error'] ?? null) ? $step['error'] : null,
+                'usage' => $this->parseStepUsage($step['usage'] ?? null),
             ];
         }
 
@@ -235,6 +239,22 @@ class RunWorkflow implements ShouldQueue
             'verdict' => $verdict,
             'escalationLevel' => $escalationLevel,
             'authenticated' => is_bool($decoded['authenticated'] ?? null) ? $decoded['authenticated'] : false,
+            'aiModel' => is_string($decoded['aiModel'] ?? null) ? $decoded['aiModel'] : null,
+        ];
+    }
+
+    /**
+     * @return array{promptTokens: int, completionTokens: int}|null
+     */
+    protected function parseStepUsage(mixed $usage): ?array
+    {
+        if (! is_array($usage) || ! is_int($usage['promptTokens'] ?? null) || ! is_int($usage['completionTokens'] ?? null)) {
+            return null;
+        }
+
+        return [
+            'promptTokens' => $usage['promptTokens'],
+            'completionTokens' => $usage['completionTokens'],
         ];
     }
 
@@ -244,10 +264,12 @@ class RunWorkflow implements ShouldQueue
     }
 
     /**
-     * @param  array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>  $steps
+     * @param  array<int, array{intent: string, state: string, screenshot: string|null, error: string|null, usage: array{promptTokens: int, completionTokens: int}|null}>  $steps
      */
-    protected function createRunSteps(array $steps): void
+    protected function createRunSteps(array $steps, ?string $aiModel): void
     {
+        $project = $this->run->workflow->project;
+
         foreach ($steps as $position => $step) {
             RunStep::create([
                 'run_id' => $this->run->id,
@@ -256,6 +278,19 @@ class RunWorkflow implements ShouldQueue
                 'state' => Verdict::from($step['state']),
                 'screenshot_path' => $this->storeScreenshot($step['screenshot'] ?? null, $position),
             ]);
+
+            if ($step['usage'] !== null && $aiModel !== null) {
+                AiUsageRecorder::record(
+                    project: $project,
+                    feature: AiUsageFeature::RunStep,
+                    usage: new AiUsage(
+                        promptTokens: $step['usage']['promptTokens'],
+                        completionTokens: $step['usage']['completionTokens'],
+                        model: $aiModel,
+                    ),
+                    run: $this->run,
+                );
+            }
         }
     }
 
@@ -266,12 +301,12 @@ class RunWorkflow implements ShouldQueue
      * than discarding them via markFailed() — keeps a record of real actions
      * already taken on the live site, so a retry doesn't blindly repeat them.
      *
-     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, authenticated: bool}  $result
+     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null, usage: array{promptTokens: int, completionTokens: int}|null}>, authenticated: bool, aiModel: string|null}  $result
      */
     protected function persistInterrupted(array $result, ?string $errorOutput): void
     {
         DB::transaction(function () use ($result, $errorOutput) {
-            $this->createRunSteps($result['steps']);
+            $this->createRunSteps($result['steps'], $result['aiModel']);
 
             $completed = count($result['steps']);
 
@@ -285,7 +320,7 @@ class RunWorkflow implements ShouldQueue
     }
 
     /**
-     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null}>, authenticated: bool}  $result
+     * @param  array{steps: array<int, array{intent: string, state: string, screenshot: string|null, error: string|null, usage: array{promptTokens: int, completionTokens: int}|null}>, authenticated: bool, aiModel: string|null}  $result
      */
     protected function persist(array $result, string $verdict, int $escalationLevel, int $durationSeconds): void
     {
@@ -294,7 +329,7 @@ class RunWorkflow implements ShouldQueue
 
             $firstBroken = collect($result['steps'])->firstWhere('state', 'BROKEN');
 
-            $this->createRunSteps($result['steps']);
+            $this->createRunSteps($result['steps'], $result['aiModel']);
 
             $resolvedVerdict = Verdict::from($verdict);
 

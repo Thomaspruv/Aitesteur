@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AiUsageFeature;
 use App\Enums\Criticality;
 use App\Enums\DiscoveryRunStatus;
 use App\Enums\RunStatus;
@@ -9,6 +10,7 @@ use App\Exceptions\AiClientException;
 use App\Jobs\RunDiscoveryCrawl;
 use App\Jobs\RunWorkflow;
 use App\Models\Workflow;
+use App\Services\Ai\UsageRecordingAiClient;
 use App\Services\Ai\WorkflowStepCompiler;
 use App\Support\UrlHost;
 use Flux\Flux;
@@ -205,6 +207,12 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
         $aiClient = $this->project->aiClient();
 
         if ($aiClient) {
+            $aiClient = new UsageRecordingAiClient(
+                inner: $aiClient,
+                project: $this->project,
+                feature: AiUsageFeature::WorkflowCompilation,
+            );
+
             try {
                 $compiled = (new WorkflowStepCompiler($aiClient))->compile($this->description);
 

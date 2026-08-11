@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -69,5 +70,13 @@ class DiscoveryRun extends Model
     public function environment(): BelongsTo
     {
         return $this->belongsTo(Environment::class);
+    }
+
+    /**
+     * @return HasMany<AiUsageEvent, $this>
+     */
+    public function aiUsageEvents(): HasMany
+    {
+        return $this->hasMany(AiUsageEvent::class);
     }
 }

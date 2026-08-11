@@ -1,10 +1,12 @@
 <?php
 
 use App\Enums\AiProvider;
+use App\Enums\AiUsageFeature;
 use App\Enums\RunStatus;
 use App\Enums\Verdict;
 use App\Enums\WorkflowStatus;
 use App\Jobs\RunWorkflow;
+use App\Models\AiUsageEvent;
 use App\Models\Run;
 use App\Models\User;
 use App\Models\Workflow;
@@ -78,6 +80,45 @@ test('a successful run persists run steps and updates the run and workflow', fun
         ->and($workflow->latest_verdict)->toBe(Verdict::Pass)
         ->and($workflow->last_run_at)->not->toBeNull()
         ->and($workflow->spark_data)->not->toBeEmpty();
+});
+
+test('per-step token usage reported by execute.mjs is recorded as an AiUsageEvent attributed to the run', function () {
+    $user = User::factory()->create();
+    $project = projectWithAi($user);
+
+    $workflow = Workflow::factory()->create([
+        'project_id' => $project->id,
+        'status' => WorkflowStatus::Active,
+        'steps' => [
+            ['intent' => 'Ouvrir la page de connexion', 'assertions' => []],
+            ['intent' => 'Se connecter', 'assertions' => []],
+        ],
+    ]);
+
+    $run = $workflow->runs()->create(['status' => RunStatus::Queued, 'triggered_by' => 'manual']);
+
+    fakeExecuteOutput(fn () => [
+        'ok' => true,
+        'steps' => [
+            ['intent' => 'Ouvrir la page de connexion', 'state' => 'PASS', 'screenshot' => null, 'error' => null, 'usage' => ['promptTokens' => 1200, 'completionTokens' => 80]],
+            ['intent' => 'Se connecter', 'state' => 'PASS', 'screenshot' => null, 'error' => null, 'usage' => ['promptTokens' => 900, 'completionTokens' => 60]],
+        ],
+        'verdict' => 'PASS',
+        'escalationLevel' => 0,
+        'authenticated' => true,
+        'aiModel' => 'deepseek-chat',
+        'error' => null,
+    ]);
+
+    (new RunWorkflow($run))->handle();
+
+    $events = AiUsageEvent::query()->where('run_id', $run->id)->get();
+
+    expect($events)->toHaveCount(2)
+        ->and($events->pluck('feature')->unique()->all())->toBe([AiUsageFeature::RunStep])
+        ->and($events->pluck('project_id')->unique()->all())->toBe([$project->id])
+        ->and($events->sum('prompt_tokens'))->toBe(2100)
+        ->and($events->sum('completion_tokens'))->toBe(140);
 });
 
 test('a passing candidate is marked verified', function () {

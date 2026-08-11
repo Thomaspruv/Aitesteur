@@ -204,12 +204,26 @@ async function callDeepSeek({ model, apiKey }, systemPrompt, userPrompt) {
             signal: controller.signal,
         });
         if (!res.ok) throw new StepError('ai_error', `Échec de l'appel IA : ${res.status}`);
-        const content = (await res.json())?.choices?.[0]?.message?.content;
-        if (typeof content !== 'string') throw new StepError('ai_error', 'Réponse IA inattendue.');
+        const body = await res.json();
+        const content = body?.choices?.[0]?.message?.content;
+        // Captured before content validation below, and attached to any
+        // StepError thrown past this point — DeepSeek bills these tokens
+        // even if the response content turns out not to be valid JSON.
+        const usage = {
+            promptTokens: body?.usage?.prompt_tokens ?? 0,
+            completionTokens: body?.usage?.completion_tokens ?? 0,
+        };
+        if (typeof content !== 'string') {
+            const error = new StepError('ai_error', 'Réponse IA inattendue.');
+            error.usage = usage;
+            throw error;
+        }
         try {
-            return JSON.parse(content);
+            return { decision: JSON.parse(content), usage };
         } catch {
-            throw new StepError('ai_error', "La réponse de l'IA n'est pas un JSON valide.");
+            const error = new StepError('ai_error', "La réponse de l'IA n'est pas un JSON valide.");
+            error.usage = usage;
+            throw error;
         }
     } catch (error) {
         if (error instanceof StepError) throw error;
@@ -320,8 +334,10 @@ async function runStep(page, intent, ai, secrets) {
             previousFailure,
         });
 
+        let usage = null;
         try {
-            const decision = await askAi(ai, SYSTEM_PROMPT, userPrompt);
+            const { decision, usage: callUsage } = await askAi(ai, SYSTEM_PROMPT, userPrompt);
+            usage = callUsage;
             validateDecision(decision, elements);
             await performAction(page, decision, elements, secrets);
             await settle(page);
@@ -333,10 +349,15 @@ async function runStep(page, intent, ai, secrets) {
                     state: attempt === 0 ? 'PASS' : 'PASS_HEALED',
                     screenshot: await captureScreenshot(page),
                     error: null,
+                    usage,
                 },
             };
         } catch (error) {
             const stepError = error instanceof StepError ? error : new StepError('action_failed', error?.message || 'Erreur inconnue.');
+            // A validateDecision/performAction failure still carries the usage
+            // captured above (the AI call itself succeeded) — a StepError
+            // thrown by callDeepSeek before that point carries its own.
+            usage = stepError.usage ?? usage;
             previousFailure = stepError;
 
             if (attempt === 1) {
@@ -347,6 +368,7 @@ async function runStep(page, intent, ai, secrets) {
                         state: 'BROKEN',
                         screenshot: await captureScreenshot(page),
                         error: `${stepError.kind}: ${stepError.message}`,
+                        usage,
                     },
                 };
             }
@@ -407,6 +429,7 @@ async function main() {
         return;
     }
     const ai = { provider, model: process.env.AI_MODEL || '', apiKey };
+    result.aiModel = ai.model || 'deepseek-chat';
 
     let steps;
     try {
