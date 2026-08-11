@@ -2,13 +2,16 @@
 
 namespace App\Providers;
 
+use App\Models\Organization;
 use App\Models\User;
 use App\Observers\UserObserver;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Laravel\Cashier\Cashier;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -28,6 +31,13 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         User::observe(UserObserver::class);
+
+        Gate::define('access-admin', fn (User $user) => $user->is_admin);
+
+        // Organization (not User) owns the Stripe subscription — the
+        // Organization is the tenancy root and billing entity here, matching
+        // how a User can belong to several Organizations.
+        Cashier::useCustomerModel(Organization::class);
     }
 
     /**
