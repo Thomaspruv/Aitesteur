@@ -35,6 +35,7 @@
                             <a href="#comment-ca-marche" class="hover:text-at-text">Comment ça marche</a>
                             <a href="#differenciation" class="hover:text-at-text">Positionnement</a>
                             <a href="#objectifs" class="hover:text-at-text">Objectifs</a>
+                            <a href="#tarifs" class="hover:text-at-text">Tarifs</a>
                         </nav>
 
                         <div class="flex items-center gap-2.5">
@@ -85,7 +86,7 @@
                             Voir comment ça marche
                         </a>
                     </div>
-                    <p class="mt-4 text-[12px] text-at-muted">Aucune carte bancaire requise. Grille tarifaire bientôt disponible.</p>
+                    <p class="mt-4 text-[12px] text-at-muted">Aucune carte bancaire requise. <a href="#tarifs" class="text-at-muted-2 underline hover:text-at-text">Voir les tarifs</a>.</p>
 
                     {{-- Decorative verdict strip --}}
                     <div class="mx-auto mt-16 flex max-w-2xl flex-wrap items-center justify-center gap-2.5">
@@ -231,12 +232,65 @@
                     </div>
                 </section>
 
+                {{-- PRICING --}}
+                <section id="tarifs" class="mx-auto max-w-6xl scroll-mt-20 px-6 pb-24">
+                    <div class="mb-12 text-center">
+                        <div class="mb-3 text-[12px] font-semibold tracking-wide text-at-cyan uppercase">Tarifs</div>
+                        <h2 class="text-[30px] font-bold tracking-tight">Simple, sans surprise</h2>
+                        <p class="mx-auto mt-3 max-w-xl text-[13.5px] text-at-muted-2">
+                            Commencez gratuitement. Passez à Pro quand vous en avez besoin, directement depuis l'app — pas de carte bancaire à l'inscription.
+                        </p>
+                    </div>
+
+                    <div class="mx-auto grid max-w-3xl gap-4 md:grid-cols-2">
+                        <div class="rounded-[14px] border border-at-border bg-at-surface p-7 backdrop-blur-md">
+                            <div class="mb-1 text-[15px] font-semibold">Free</div>
+                            <p class="mb-5 text-[12.5px] text-at-muted">Pour découvrir airtight sur un premier projet.</p>
+                            <div class="mb-6 flex items-baseline gap-1">
+                                <span class="font-data text-[34px] font-bold">0 €</span>
+                                <span class="text-[13px] text-at-muted">/mois</span>
+                            </div>
+                            <ul class="mb-7 flex flex-col gap-2.5 text-[13px] text-at-muted-2">
+                                <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-verdict-pass"></span> 1 environnement</li>
+                                <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-verdict-pass"></span> Découverte automatique</li>
+                                <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-verdict-pass"></span> Runs illimités</li>
+                            </ul>
+                            @if (Route::has('register'))
+                                <a href="{{ route('register') }}" class="block w-full rounded-md border border-at-border-2 py-2.5 text-center text-[13px] font-semibold text-at-text hover:bg-at-surface-3">
+                                    Commencer gratuitement
+                                </a>
+                            @endif
+                        </div>
+
+                        <div class="relative rounded-[14px] border border-at-violet/40 bg-at-violet/10 p-7 backdrop-blur-md">
+                            <div class="absolute -top-3 right-6 rounded-full bg-linear-to-r from-at-violet-2 to-at-cyan-2 px-3 py-1 text-[10.5px] font-semibold text-at-bg">Par environnement</div>
+                            <div class="mb-1 text-[15px] font-semibold">Pro</div>
+                            <p class="mb-5 text-[12.5px] text-at-muted">Pour surveiller plusieurs environnements en continu.</p>
+                            <div class="mb-6 flex items-baseline gap-1">
+                                <span class="font-data text-[34px] font-bold">19 €</span>
+                                <span class="text-[13px] text-at-muted">/mois par environnement</span>
+                            </div>
+                            <ul class="mb-7 flex flex-col gap-2.5 text-[13px] text-at-text-2">
+                                <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-at-violet"></span> Tout Free, sans limite</li>
+                                <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-at-violet"></span> Environnements supplémentaires</li>
+                                <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-at-violet"></span> Support prioritaire</li>
+                            </ul>
+                            @if (Route::has('register'))
+                                <a href="{{ route('register') }}" class="block w-full rounded-md bg-linear-to-r from-at-violet-2 to-at-cyan-2 py-2.5 text-center text-[13px] font-semibold text-at-bg shadow-[0_0_18px_oklch(65%_0.16_280_/_0.4)]">
+                                    Créer un compte
+                                </a>
+                            @endif
+                        </div>
+                    </div>
+                    <p class="mt-6 text-center text-[12px] text-at-muted">L'abonnement Pro se gère depuis l'app, après création du compte.</p>
+                </section>
+
                 {{-- FINAL CTA --}}
                 <section class="mx-auto max-w-6xl px-6 pb-24">
                     <div class="rounded-[20px] border border-at-violet/30 bg-linear-to-br from-at-violet/15 via-at-surface to-at-cyan/10 p-10 text-center backdrop-blur-md md:p-14">
                         <h2 class="mx-auto max-w-lg text-[26px] font-bold tracking-tight md:text-[30px]">Prêt à arrêter de rejouer vos parcours à la main ?</h2>
                         <p class="mx-auto mt-3 max-w-md text-[13.5px] text-at-muted-2">
-                            Créez un compte gratuitement dès maintenant. La grille tarifaire arrive bientôt — en attendant, l'accès en avant-première est ouvert.
+                            Créez un compte gratuitement dès maintenant — 1 environnement inclus, sans carte bancaire.
                         </p>
                         <div class="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
                             @if (Route::has('register'))
@@ -257,7 +311,7 @@
                 <footer class="border-t border-at-border">
                     <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-[12px] text-at-muted sm:flex-row">
                         <x-wordmark class="text-[13px] text-at-muted-2" />
-                        <div>&copy; {{ date('Y') }} airtight. Tarifs bientôt disponibles.</div>
+                        <div>&copy; {{ date('Y') }} airtight. <a href="#tarifs" class="hover:text-at-text">Tarifs</a>.</div>
                     </div>
                 </footer>
             </div>

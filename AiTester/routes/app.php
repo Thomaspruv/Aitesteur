@@ -10,4 +10,5 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('workflows/{workflow}/runs', 'pages::app.workflows.runs')->name('workflows.runs');
     Route::livewire('settings-ia', 'pages::app.settings-ai')->name('settings-ai');
     Route::livewire('settings-environnement', 'pages::app.settings-environment')->name('settings-environment');
+    Route::livewire('settings-abonnement', 'pages::app.settings-abonnement')->name('settings-abonnement');
 });

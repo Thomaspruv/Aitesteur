@@ -11,6 +11,7 @@
         ['id' => 'editor', 'label' => __('Éditeur'), 'href' => $latestWorkflow ? route('workflows.edit', $latestWorkflow) : null, 'disabledHint' => __('Disponible après votre premier workflow actif')],
         ['id' => 'settings-ai', 'label' => __('Réglages IA'), 'href' => route('settings-ai'), 'disabledHint' => null],
         ['id' => 'settings-environment', 'label' => __('Réglages environnement'), 'href' => route('settings-environment'), 'disabledHint' => null],
+        ['id' => 'settings-abonnement', 'label' => __('Abonnement'), 'href' => route('settings-abonnement'), 'disabledHint' => null],
     ];
 @endphp
 <!DOCTYPE html>
