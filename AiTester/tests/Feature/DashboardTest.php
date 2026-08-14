@@ -21,6 +21,20 @@ test('authenticated users can visit the dashboard', function () {
     $response->assertOk();
 });
 
+test('the sidebar project and environment switchers render inside the full page without error', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $this->actingAs($user);
+
+    // Exercises the <livewire:project-switcher /> / <livewire:environment-switcher />
+    // tags embedded in the shared layout — a component name typo or missing
+    // view wouldn't be caught by testing those components in isolation.
+    $this->get(route('dashboard'))
+        ->assertOk()
+        ->assertSeeText($project->slug)
+        ->assertSeeText($project->primaryEnvironment()->name);
+});
+
 test('dashboard shows an empty state for a project with no active workflows', function () {
     $user = User::factory()->create();
     $this->actingAs($user);

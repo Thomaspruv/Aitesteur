@@ -106,6 +106,23 @@ class Project extends Model
         return $this->environments()->first();
     }
 
+    /**
+     * The environment the switcher currently has selected for this project.
+     * Scoped to $this project so a stale pick left over from a different
+     * project (e.g. after switching projects) is simply ignored rather than
+     * needing to be explicitly cleared — falls back to primaryEnvironment().
+     */
+    public function activeEnvironment(): ?Environment
+    {
+        $environmentId = session('active_environment_id');
+
+        $environment = $environmentId
+            ? $this->environments()->whereKey($environmentId)->first()
+            : null;
+
+        return $environment ?? $this->primaryEnvironment();
+    }
+
     public function aiClient(): ?AiClient
     {
         if (! $this->ai_provider || ! $this->ai_api_key) {

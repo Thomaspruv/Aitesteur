@@ -5,12 +5,21 @@ use App\Models\Project;
 use App\Support\UrlHost;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav' => 'settings-environment'])] class extends Component {
+    /**
+     * The plan page (⚡settings-abonnement.blade.php) and the landing page
+     * both advertise this as the Free plan's limit — the actual enforcement
+     * lives here, at the only place an Environment ever gets created outside
+     * onboarding.
+     */
+    private const FREE_PLAN_ENVIRONMENT_LIMIT = 1;
+
     public Project $project;
 
     public Environment $environment;
@@ -29,17 +38,76 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
 
         $this->authorize('view', $this->project);
 
-        $this->environment = $this->project->primaryEnvironment()
+        $this->environment = $this->project->activeEnvironment()
             ?? $this->project->environments()->create(['name' => 'staging']);
 
-        $this->url = $this->environment->url ?? '';
-        $this->username = $this->environment->username ?? '';
+        $this->loadEnvironment($this->environment);
+    }
+
+    #[Computed]
+    public function environments()
+    {
+        return $this->project->environments;
     }
 
     #[Computed]
     public function needsAuthorizationConfirmation(): bool
     {
         return $this->environment->needsReauthorizationFor($this->url);
+    }
+
+    /**
+     * Makes $target this project's active site — same session key the
+     * sidebar's environment switcher writes — and loads its saved values
+     * into the edit form below, discarding whatever unsaved edits were in
+     * progress for the previously-selected environment.
+     */
+    public function activate(Environment $target): void
+    {
+        $this->authorize('view', $this->project);
+
+        abort_unless($target->project_id === $this->project->id, 403);
+
+        session(['active_environment_id' => $target->id]);
+
+        $this->loadEnvironment($target);
+        $this->resetErrorBag();
+
+        unset($this->needsAuthorizationConfirmation);
+    }
+
+    public function createEnvironment(): void
+    {
+        $this->authorize('view', $this->project);
+
+        // Locks the project row for the duration of the check-then-create so two
+        // concurrent clicks (or open tabs) can't both read a count under the limit
+        // and each create an environment — the count/create pair below isn't
+        // otherwise atomic, and there's no DB constraint capping environments per
+        // project the way ProjectSwitcher's slug uniqueness can lean on one.
+        $created = DB::transaction(function () {
+            $project = Project::query()->whereKey($this->project->id)->lockForUpdate()->firstOrFail();
+
+            $count = $project->environments()->count();
+
+            if ($count >= self::FREE_PLAN_ENVIRONMENT_LIMIT && ! $project->organization->subscribed('default')) {
+                return null;
+            }
+
+            return $project->environments()->create(['name' => __('Nouveau site :n', ['n' => $count + 1])]);
+        });
+
+        if (! $created) {
+            Flux::toast(variant: 'warning', text: __('Le plan gratuit est limité à :limit environnement — passez à Pro pour en ajouter.', ['limit' => self::FREE_PLAN_ENVIRONMENT_LIMIT]));
+
+            return;
+        }
+
+        unset($this->environments);
+
+        $this->activate($created);
+
+        Flux::toast(variant: 'success', text: __('Site ajouté — configurez son URL ci-dessous.'));
     }
 
     public function save(): void
@@ -89,15 +157,50 @@ new #[Title('Réglages environnement')] #[Layout('layouts::product', ['activeNav
 
         $this->password = '';
         $this->targetAuthorized = false;
-        unset($this->needsAuthorizationConfirmation);
+        unset($this->needsAuthorizationConfirmation, $this->environments);
 
         Flux::toast(variant: 'success', text: __('Réglages environnement enregistrés.'));
+    }
+
+    private function loadEnvironment(Environment $environment): void
+    {
+        $this->environment = $environment;
+        $this->url = $environment->url ?? '';
+        $this->username = $environment->username ?? '';
+        $this->password = '';
+        $this->targetAuthorized = false;
     }
 }; ?>
 
 <div class="max-w-xl">
+    @if ($this->environments->count() > 1)
+        <div class="mb-4 flex flex-col gap-1.5">
+            @foreach ($this->environments as $item)
+                <button
+                    type="button"
+                    wire:click="activate({{ $item->id }})"
+                    class="flex items-center justify-between rounded-[9px] border px-3 py-2 text-start text-[12.5px]
+                        {{ $item->id === $environment->id ? 'border-at-violet/50 bg-at-violet/15 text-at-text' : 'border-at-border-2 bg-at-surface text-at-muted hover:bg-at-surface-3' }}"
+                >
+                    <span class="flex flex-col">
+                        <span class="font-medium">{{ $item->name }}</span>
+                        <span class="text-[11px] text-at-muted">{{ $item->url ?? __('URL non configurée') }}</span>
+                    </span>
+                    @if ($item->id === $environment->id)
+                        <span class="text-[11px] font-semibold text-at-violet-2">{{ __('Actif') }}</span>
+                    @endif
+                </button>
+            @endforeach
+        </div>
+    @endif
+
     <div class="rounded-[14px] border border-at-border bg-at-surface p-6 backdrop-blur-md">
-        <div class="mb-1 text-[15px] font-semibold">{{ __('Environnement par défaut') }}</div>
+        <div class="mb-1 flex items-center justify-between gap-2">
+            <div class="text-[15px] font-semibold">{{ $environment->name }}</div>
+            <button type="button" wire:click="createEnvironment" class="text-[11.5px] font-medium text-at-violet-2 hover:underline">
+                {{ __('+ Nouveau site') }}
+            </button>
+        </div>
         <p class="mb-5 text-[12.5px] text-at-muted">
             {{ __("L'URL et les identifiants utilisés par défaut pour la découverte automatique et l'exécution des workflows. Vous pouvez toujours saisir des identifiants différents ponctuellement depuis l'écran Découverte.") }}
         </p>

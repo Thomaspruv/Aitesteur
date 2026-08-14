@@ -72,11 +72,23 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
-     * The project the user is currently working in — this app has no project
-     * switcher yet, so it's always the first organization's first project.
+     * The project the user is currently working in. Tries the switcher's
+     * session pick first — re-validated against the user's own organizations
+     * on every read, since the id in session is user-controlled input, not a
+     * trusted reference — and falls back to the first organization's first
+     * project (this app has no organization switcher, so that's always
+     * well-defined).
      */
     public function currentProject(): ?Project
     {
-        return once(fn () => $this->organizations()->first()?->projects()->first());
+        return once(function () {
+            $projectId = session('active_project_id');
+
+            $project = $projectId
+                ? Project::whereKey($projectId)->whereHas('organization.users', fn ($query) => $query->whereKey($this->id))->first()
+                : null;
+
+            return $project ?? $this->organizations()->first()?->projects()->first();
+        });
     }
 }

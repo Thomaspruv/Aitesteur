@@ -1,6 +1,6 @@
 @php
     $project = auth()->user()->currentProject();
-    $environment = $project?->primaryEnvironment();
+    $environment = $project?->activeEnvironment();
     $latestRun = $project?->latestRun();
     $latestWorkflow = $project?->latestActiveWorkflow();
 
@@ -55,11 +55,12 @@
                     </div>
 
                     @if ($project)
-                        <div class="flex items-center justify-between px-2">
-                            <div class="font-data text-xs font-medium text-at-muted-2">
-                                {{ $project->slug }}@if ($environment) &middot; {{ $environment->name }} @endif
-                            </div>
-                            <div class="size-[7px] animate-[at-pulse-dot_2.2s_ease-in-out_infinite] rounded-full bg-verdict-pass" style="box-shadow: 0 0 6px var(--color-verdict-pass)"></div>
+                        <div class="flex items-center gap-1.5 px-2">
+                            <livewire:project-switcher />
+                            <div class="size-[7px] shrink-0 animate-[at-pulse-dot_2.2s_ease-in-out_infinite] rounded-full bg-verdict-pass" style="box-shadow: 0 0 6px var(--color-verdict-pass)"></div>
+                        </div>
+                        <div class="px-2">
+                            <livewire:environment-switcher />
                         </div>
                     @endif
 

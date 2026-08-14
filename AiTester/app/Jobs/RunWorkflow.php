@@ -73,7 +73,25 @@ class RunWorkflow implements ShouldQueue
     {
         $workflow = $this->run->workflow;
         $project = $workflow->project;
-        $environment = $project->primaryEnvironment();
+        // Read the environment snapshotted on the run at creation time (set
+        // synchronously, in the web request, alongside the switcher's session
+        // pick) rather than re-deriving "the" environment here — this job runs
+        // in the queue worker, which has no access to that HTTP session, so
+        // re-deriving here would silently ignore whichever site the user had
+        // actually selected. Falls back to primaryEnvironment() for runs
+        // created before this column existed.
+        $environment = $this->run->environment ?? $project->primaryEnvironment();
+
+        // Defense in depth: $this->run->environment is a plain FK read, not
+        // scoped to $project by the query itself — nothing upstream
+        // guarantees the run was actually stamped with an environment
+        // belonging to its own workflow's project, so that's re-checked
+        // explicitly here rather than trusted.
+        if ($environment && $environment->project_id !== $project->id) {
+            $this->markFailed("L'environnement associé à ce run n'appartient pas au projet du workflow.");
+
+            return;
+        }
 
         if (! $environment?->url) {
             $this->markFailed("Aucune URL n'est configurée pour cet environnement.");
@@ -324,14 +342,22 @@ class RunWorkflow implements ShouldQueue
      */
     protected function persist(array $result, string $verdict, int $escalationLevel, int $durationSeconds): void
     {
-        DB::transaction(function () use ($result, $verdict, $escalationLevel, $durationSeconds) {
+        // Resolved before the transaction opens on purpose: Verdict::from()
+        // throws on a $verdict string that doesn't match a backing value —
+        // parseExecuteResult() only proved it's *a* string — and letting that
+        // throw happen after createRunSteps() has already inserted
+        // AiUsageEvent rows inside the transaction below would roll back
+        // usage records for tokens DeepSeek already billed for. Same
+        // reasoning as RunDiscoveryCrawl::persist()'s pre-transaction
+        // AI-usage computation.
+        $resolvedVerdict = Verdict::from($verdict);
+
+        DB::transaction(function () use ($result, $resolvedVerdict, $escalationLevel, $durationSeconds) {
             $workflow = $this->run->workflow;
 
             $firstBroken = collect($result['steps'])->firstWhere('state', 'BROKEN');
 
             $this->createRunSteps($result['steps'], $result['aiModel']);
-
-            $resolvedVerdict = Verdict::from($verdict);
 
             $this->run->update([
                 'status' => RunStatus::Completed,

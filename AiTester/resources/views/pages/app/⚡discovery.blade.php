@@ -37,15 +37,37 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
 
     public string $candidateFilter = 'pending';
 
+    public ?int $environmentId = null;
+
     public function mount(): void
     {
-        $this->crawlUrl = Auth::user()->currentProject()?->primaryEnvironment()?->url ?? '';
+        $environment = Auth::user()->currentProject()?->activeEnvironment();
+        $this->environmentId = $environment?->id;
+        $this->crawlUrl = $environment?->url ?? '';
     }
 
     #[Computed]
     public function project()
     {
         return Auth::user()->currentProject();
+    }
+
+    /**
+     * The environment this form reads/writes — pinned to whichever one was
+     * active when the page loaded (via $environmentId), not re-derived from
+     * the session on every request. Session-driven "active environment" can
+     * change in another browser tab between page load and form submission;
+     * re-resolving activeEnvironment() fresh at submit time would let a stale
+     * tab silently write its stale crawlUrl/credentials onto whatever
+     * environment happens to be active *now*, which may no longer be the one
+     * this page is showing.
+     */
+    #[Computed]
+    public function environment()
+    {
+        return $this->environmentId
+            ? $this->project?->environments()->whereKey($this->environmentId)->first()
+            : null;
     }
 
     #[Computed]
@@ -77,13 +99,13 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
     #[Computed]
     public function hasStoredCredentials(): bool
     {
-        return filled($this->project?->primaryEnvironment()?->username);
+        return filled($this->environment?->username);
     }
 
     #[Computed]
     public function storedUsername(): ?string
     {
-        return $this->project?->primaryEnvironment()?->username;
+        return $this->environment?->username;
     }
 
     /**
@@ -95,7 +117,7 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
     #[Computed]
     public function needsAuthorizationConfirmation(): bool
     {
-        return $this->project?->primaryEnvironment()?->needsReauthorizationFor($this->crawlUrl)
+        return $this->environment?->needsReauthorizationFor($this->crawlUrl)
             ?? ($this->crawlUrl !== '');
     }
 
@@ -181,6 +203,12 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
         $run = $workflow->runs()->create([
             'status' => RunStatus::Queued,
             'triggered_by' => 'manual',
+            // The workflow's own project, not $this->project (the session-
+            // active project) — they can differ if the user switched the
+            // active project in another tab since this candidate was
+            // rendered, and a candidate is always shown for its own project
+            // regardless of which one is currently active.
+            'environment_id' => $workflow->project->activeEnvironment()?->id,
         ]);
 
         RunWorkflow::dispatch($run);
@@ -269,24 +297,25 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
         }
 
         $this->validate([
+            // Routed through UrlHost — the same single source of truth used
+            // for the authorization-host check a few lines below — rather
+            // than hand-parsing the URL here, since a PHP/browser parsing
+            // disagreement on scheme casing or a stray backslash is exactly
+            // what would let this self-target check be bypassed.
             'crawlUrl' => ['required', 'string', 'max:255', function ($attribute, $value, $fail) {
-                $normalized = str_starts_with($value, 'http://') || str_starts_with($value, 'https://')
-                    ? $value
-                    : 'https://'.$value;
-
-                if (! filter_var($normalized, FILTER_VALIDATE_URL)) {
+                if (! filter_var(UrlHost::normalize($value), FILTER_VALIDATE_URL)) {
                     $fail(__("Cette URL n'est pas valide."));
 
                     return;
                 }
 
-                $host = parse_url($normalized, PHP_URL_HOST);
+                $host = UrlHost::of($value);
                 $blockedHosts = array_filter([
-                    parse_url((string) config('app.url'), PHP_URL_HOST),
-                    request()->getHost(),
+                    UrlHost::of((string) config('app.url')),
+                    strtolower(request()->getHost()),
                 ]);
 
-                if ($host && collect($blockedHosts)->contains(fn ($blocked) => strcasecmp($host, $blocked) === 0)) {
+                if ($host && collect($blockedHosts)->contains($host)) {
                     $fail(__("Impossible de lancer une découverte sur l'application elle-même."));
                 }
             }],
@@ -304,8 +333,17 @@ new #[Title('Review de découverte')] #[Layout('layouts::product', ['activeNav' 
 
         RateLimiter::hit($rateLimitKey, decaySeconds: 3600);
 
-        $environment = $this->project->primaryEnvironment()
-            ?? $this->project->environments()->create(['name' => 'staging']);
+        // The environment pinned at mount() (see $this->environment's
+        // docblock) — not a fresh activeEnvironment() lookup — so this write
+        // always lands on the same environment this form has been showing,
+        // even if the session's active pick changed in another tab since.
+        $environment = $this->environment;
+
+        if (! $environment) {
+            $environment = $this->project->environments()->create(['name' => 'staging']);
+            $this->environmentId = $environment->id;
+            unset($this->environment);
+        }
 
         $environment->update([
             'url' => $this->crawlUrl,

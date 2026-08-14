@@ -15,6 +15,7 @@ use Illuminate\Support\Carbon;
 /**
  * @property int $id
  * @property int $workflow_id
+ * @property int|null $environment_id
  * @property RunStatus $status
  * @property Verdict|null $verdict
  * @property int|null $escalation_level
@@ -30,7 +31,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['workflow_id', 'status', 'verdict', 'escalation_level', 'triggered_by', 'confirmed', 'authenticated', 'expected_label', 'observed_label', 'diagnostic_summary', 'error', 'started_at', 'finished_at'])]
+#[Fillable(['workflow_id', 'environment_id', 'status', 'verdict', 'escalation_level', 'triggered_by', 'confirmed', 'authenticated', 'expected_label', 'observed_label', 'diagnostic_summary', 'error', 'started_at', 'finished_at'])]
 class Run extends Model
 {
     /** @use HasFactory<RunFactory> */
@@ -57,6 +58,14 @@ class Run extends Model
     public function workflow(): BelongsTo
     {
         return $this->belongsTo(Workflow::class);
+    }
+
+    /**
+     * @return BelongsTo<Environment, $this>
+     */
+    public function environment(): BelongsTo
+    {
+        return $this->belongsTo(Environment::class);
     }
 
     /**

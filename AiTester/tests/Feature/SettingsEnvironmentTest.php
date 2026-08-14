@@ -124,3 +124,60 @@ test('it creates a primary environment on the fly if none exists yet', function 
     expect($project->primaryEnvironment())->not->toBeNull()
         ->and($project->primaryEnvironment()->url)->toBe('https://example.com');
 });
+
+test('a free-plan project is blocked from creating a second environment', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+
+    $this->actingAs($user);
+
+    Livewire::test('pages::app.settings-environment')
+        ->call('createEnvironment');
+
+    expect($project->environments()->count())->toBe(1);
+});
+
+test('a pro-plan project can create additional environments', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $organization = $project->organization;
+
+    $organization->subscriptions()->create([
+        'type' => 'default',
+        'stripe_id' => 'sub_test123',
+        'stripe_status' => 'active',
+        'stripe_price' => 'price_test',
+        'quantity' => 1,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('pages::app.settings-environment')
+        ->call('createEnvironment');
+
+    expect($project->environments()->count())->toBe(2);
+});
+
+test('a newly created environment becomes the active one', function () {
+    $user = User::factory()->create();
+    $project = $user->currentProject();
+    $organization = $project->organization;
+
+    $organization->subscriptions()->create([
+        'type' => 'default',
+        'stripe_id' => 'sub_test123',
+        'stripe_status' => 'active',
+        'stripe_price' => 'price_test',
+        'quantity' => 1,
+    ]);
+
+    $this->actingAs($user);
+
+    $component = Livewire::test('pages::app.settings-environment')
+        ->call('createEnvironment');
+
+    $newEnvironment = $project->environments()->latest('id')->first();
+
+    expect($component->get('environment')->id)->toBe($newEnvironment->id)
+        ->and(session('active_environment_id'))->toBe($newEnvironment->id);
+});

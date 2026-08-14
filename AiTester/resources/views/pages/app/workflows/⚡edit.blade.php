@@ -73,6 +73,7 @@ new #[Title('Éditeur de workflow')] #[Layout('layouts::product', ['activeNav' =
         $run = $this->workflow->runs()->create([
             'status' => RunStatus::Queued,
             'triggered_by' => 'manual',
+            'environment_id' => $this->workflow->project->activeEnvironment()?->id,
         ]);
 
         RunWorkflow::dispatch($run);
