@@ -143,6 +143,46 @@ select:focus[data-flux-control] {
     background-image: repeating-linear-gradient(45deg, oklch(18% 0.02 268), oklch(18% 0.02 268) 6px, oklch(22% 0.025 268) 6px, oklch(22% 0.025 268) 12px);
 }
 
+.at-legal-content h2 {
+    color: var(--color-at-text);
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.at-legal-content h3 {
+    color: var(--color-at-text-2);
+    font-size: 14.5px;
+    font-weight: 600;
+}
+
+.at-legal-content ul {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding-left: 1.1rem;
+    list-style: disc;
+}
+
+.at-legal-content a {
+    color: var(--color-at-cyan-2);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.at-legal-content strong {
+    color: var(--color-at-text-2);
+    font-weight: 600;
+}
+
+.at-legal-fill {
+    border-radius: 4px;
+    background: color-mix(in oklch, var(--color-verdict-broken) 18%, transparent);
+    padding: 0.05em 0.4em;
+    color: var(--color-verdict-broken);
+    font-weight: 600;
+}
+
 .at-filmstrip-error {
     background-image: repeating-linear-gradient(45deg, oklch(22% 0.05 18), oklch(22% 0.05 18) 6px, oklch(26% 0.06 18) 6px, oklch(26% 0.06 18) 12px);
 }

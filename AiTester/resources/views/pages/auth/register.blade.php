@@ -54,6 +54,13 @@
                 viewable
             />
 
+            <p class="text-center text-[12px] text-at-muted">
+                {{ __('En créant un compte, vous acceptez les') }}
+                <flux:link :href="route('legal.cgu')">{{ __("CGU/CGV") }}</flux:link>
+                {{ __('et la') }}
+                <flux:link :href="route('legal.privacy')">{{ __('politique de confidentialité') }}</flux:link>.
+            </p>
+
             <div class="flex items-center justify-end">
                 <flux:button type="submit" variant="primary" class="w-full" data-test="register-user-button">
                     {{ __('Créer le compte') }}

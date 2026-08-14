@@ -15,3 +15,4 @@ Route::post('stripe/webhook', [WebhookController::class, 'handleWebhook'])->name
 require __DIR__.'/app.php';
 require __DIR__.'/settings.php';
 require __DIR__.'/admin.php';
+require __DIR__.'/legal.php';

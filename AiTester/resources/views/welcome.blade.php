@@ -263,12 +263,12 @@
                         </div>
 
                         <div class="relative rounded-[14px] border border-at-violet/40 bg-at-violet/10 p-7 backdrop-blur-md">
-                            <div class="absolute -top-3 right-6 rounded-full bg-linear-to-r from-at-violet-2 to-at-cyan-2 px-3 py-1 text-[10.5px] font-semibold text-at-bg">Par environnement</div>
+                            <div class="absolute -top-3 right-6 rounded-full bg-linear-to-r from-at-violet-2 to-at-cyan-2 px-3 py-1 text-[10.5px] font-semibold text-at-bg">Populaire</div>
                             <div class="mb-1 text-[15px] font-semibold">Pro</div>
                             <p class="mb-5 text-[12.5px] text-at-muted">Pour surveiller plusieurs environnements en continu.</p>
                             <div class="mb-6 flex items-baseline gap-1">
                                 <span class="font-data text-[34px] font-bold">19 €</span>
-                                <span class="text-[13px] text-at-muted">/mois par environnement</span>
+                                <span class="text-[13px] text-at-muted">/mois</span>
                             </div>
                             <ul class="mb-7 flex flex-col gap-2.5 text-[13px] text-at-text-2">
                                 <li class="flex items-center gap-2"><span class="size-1.5 shrink-0 rounded-full bg-at-violet"></span> Tout Free, sans limite</li>
@@ -311,7 +311,13 @@
                 <footer class="border-t border-at-border">
                     <div class="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 text-[12px] text-at-muted sm:flex-row">
                         <x-wordmark class="text-[13px] text-at-muted-2" />
-                        <div>&copy; {{ date('Y') }} airtight. <a href="#tarifs" class="hover:text-at-text">Tarifs</a>.</div>
+                        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+                            <span>&copy; {{ date('Y') }} airtight.</span>
+                            <a href="#tarifs" class="hover:text-at-text">Tarifs</a>
+                            <a href="{{ route('legal.mentions') }}" class="hover:text-at-text">Mentions légales</a>
+                            <a href="{{ route('legal.cgu') }}" class="hover:text-at-text">CGU/CGV</a>
+                            <a href="{{ route('legal.privacy') }}" class="hover:text-at-text">Confidentialité</a>
+                        </div>
                     </div>
                 </footer>
             </div>
