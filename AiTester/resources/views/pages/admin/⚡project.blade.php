@@ -28,7 +28,11 @@ new #[Title('Coûts du projet')] #[Layout('layouts::admin')] class extends Compo
             ->groupBy('feature')
             ->get()
             ->map(fn ($row) => [
-                'feature' => AiUsageFeature::from($row->feature),
+                // $row is an AiUsageEvent instance hydrated from a selectRaw()
+                // query — Eloquent already applies AiUsageEvent::casts()'s
+                // enum cast, so $row->feature is an AiUsageFeature instance
+                // here, not a raw string; AiUsageFeature::from() would throw.
+                'feature' => $row->feature,
                 'cost_usd' => (float) $row->cost_usd,
                 'total_tokens' => (int) $row->total_tokens,
                 'events' => (int) $row->events,

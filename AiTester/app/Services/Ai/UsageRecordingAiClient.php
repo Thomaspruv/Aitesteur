@@ -24,14 +24,27 @@ class UsageRecordingAiClient implements AiClient
         try {
             return $this->inner->chatJson($systemPrompt, $userPrompt);
         } finally {
-            if ($this->inner->lastUsage() !== null) {
-                AiUsageRecorder::record(
-                    project: $this->project,
-                    feature: $this->feature,
-                    usage: $this->inner->lastUsage(),
-                    run: $this->run,
-                    discoveryRun: $this->discoveryRun,
-                );
+            $usage = $this->inner->lastUsage();
+
+            if ($usage !== null) {
+                // Recording usage is bookkeeping, not the primary operation —
+                // if it throws (e.g. a transient DB error), it must not
+                // replace whatever the try block above produced (a successful
+                // result, or the real exception that caused it to fail).
+                // Unguarded, an exception here also wouldn't be an
+                // AiClientException, so it would evade every caller's
+                // catch (AiClientException) and surface as an unrelated crash.
+                try {
+                    AiUsageRecorder::record(
+                        project: $this->project,
+                        feature: $this->feature,
+                        usage: $usage,
+                        run: $this->run,
+                        discoveryRun: $this->discoveryRun,
+                    );
+                } catch (\Throwable $exception) {
+                    report($exception);
+                }
             }
         }
     }

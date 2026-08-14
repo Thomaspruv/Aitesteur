@@ -44,7 +44,12 @@ class AiUsageRecorder
     protected static function rates(Project $project, string $model): array
     {
         $provider = $project->ai_provider?->value;
-        $rates = config("ai_pricing.{$provider}.{$model}");
+
+        // Looked up via an explicit path array, not a dot-notation string
+        // ("ai_pricing.{$provider}.{$model}") — a model name containing a
+        // dot (e.g. a future "gpt-3.5-turbo") would otherwise be parsed as
+        // nested config segments instead of matching the intended flat key.
+        $rates = data_get(config('ai_pricing'), [$provider, $model]);
 
         if (! self::isRatePair($rates)) {
             Log::warning('No configured AI pricing rate for model, falling back to provider default.', [
@@ -52,17 +57,28 @@ class AiUsageRecorder
                 'model' => $model,
             ]);
 
-            $rates = config("ai_pricing.{$provider}.default");
+            $rates = data_get(config('ai_pricing'), [$provider, 'default']);
         }
 
-        return self::isRatePair($rates) ? $rates : ['input_per_million' => 0.0, 'output_per_million' => 0.0];
+        if (! self::isRatePair($rates)) {
+            return ['input_per_million' => 0.0, 'output_per_million' => 0.0];
+        }
+
+        return [
+            'input_per_million' => (float) $rates['input_per_million'],
+            'output_per_million' => (float) $rates['output_per_million'],
+        ];
     }
 
     /**
-     * @phpstan-assert-if-true array{input_per_million: float, output_per_million: float} $rates
+     * is_numeric() rather than is_float() — a config rate written as a whole
+     * number (e.g. `1` instead of `1.0`) is a valid int in PHP and would
+     * otherwise be silently rejected as "not configured."
+     *
+     * @phpstan-assert-if-true array{input_per_million: int|float, output_per_million: int|float} $rates
      */
     protected static function isRatePair(mixed $rates): bool
     {
-        return is_array($rates) && is_float($rates['input_per_million'] ?? null) && is_float($rates['output_per_million'] ?? null);
+        return is_array($rates) && is_numeric($rates['input_per_million'] ?? null) && is_numeric($rates['output_per_million'] ?? null);
     }
 }

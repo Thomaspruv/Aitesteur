@@ -320,8 +320,22 @@ async function settle(page) {
 // still ends BROKEN genuinely reached level 1, even though its outcome isn't
 // PASS_HEALED — collapsing the two would make a run that attempted self-healing
 // indistinguishable from one that never tried.
+function addUsage(total, usage) {
+    if (!usage) return total;
+    return {
+        promptTokens: (total?.promptTokens ?? 0) + usage.promptTokens,
+        completionTokens: (total?.completionTokens ?? 0) + usage.completionTokens,
+    };
+}
+
 async function runStep(page, intent, ai, secrets) {
     let previousFailure = null;
+    // Accumulated across attempts, not reset per-iteration — a self-heal
+    // retry's attempt-0 AI call is a real, billed DeepSeek request even when
+    // its decision turns out invalid, so its tokens must still be reflected
+    // in the usage eventually recorded for this step, on top of whatever the
+    // retry itself bills.
+    let totalUsage = null;
 
     for (let attempt = 0; attempt <= 1; attempt++) {
         const elements = await enumerateElements(page);
@@ -338,6 +352,7 @@ async function runStep(page, intent, ai, secrets) {
         try {
             const { decision, usage: callUsage } = await askAi(ai, SYSTEM_PROMPT, userPrompt);
             usage = callUsage;
+            totalUsage = addUsage(totalUsage, usage);
             validateDecision(decision, elements);
             await performAction(page, decision, elements, secrets);
             await settle(page);
@@ -349,15 +364,20 @@ async function runStep(page, intent, ai, secrets) {
                     state: attempt === 0 ? 'PASS' : 'PASS_HEALED',
                     screenshot: await captureScreenshot(page),
                     error: null,
-                    usage,
+                    usage: totalUsage,
                 },
             };
         } catch (error) {
             const stepError = error instanceof StepError ? error : new StepError('action_failed', error?.message || 'Erreur inconnue.');
             // A validateDecision/performAction failure still carries the usage
             // captured above (the AI call itself succeeded) — a StepError
-            // thrown by callDeepSeek before that point carries its own.
-            usage = stepError.usage ?? usage;
+            // thrown by callDeepSeek before that point carries its own. Only
+            // add it once: if askAi() already succeeded, its usage is already
+            // in totalUsage above, and stepError.usage would be undefined in
+            // that case (only callDeepSeek attaches .usage to its throws).
+            if (stepError.usage) {
+                totalUsage = addUsage(totalUsage, stepError.usage);
+            }
             previousFailure = stepError;
 
             if (attempt === 1) {
@@ -368,7 +388,7 @@ async function runStep(page, intent, ai, secrets) {
                         state: 'BROKEN',
                         screenshot: await captureScreenshot(page),
                         error: `${stepError.kind}: ${stepError.message}`,
-                        usage,
+                        usage: totalUsage,
                     },
                 };
             }
