@@ -12,6 +12,10 @@ class ProjectPolicy
      */
     public function view(User $user, Project $project): bool
     {
-        return $user->organizations()->whereKey($project->organization_id)->exists();
+        // Admins can inspect any project's data from the admin panel (cost
+        // dashboards, and — via WorkflowPolicy/RunPolicy, which both delegate
+        // here — the runs/workflows those dashboards link into), regardless
+        // of organization membership.
+        return $user->is_admin || $user->organizations()->whereKey($project->organization_id)->exists();
     }
 }

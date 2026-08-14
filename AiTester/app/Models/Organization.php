@@ -56,11 +56,15 @@ class Organization extends Model
 
     /**
      * The email Stripe sends receipts/invoices to and prefills at Checkout —
-     * Cashier doesn't require this (a Customer can exist with no email), but
+     * Cashier's Billable trait calls this specific method name (its default
+     * implementation reads $this->email, which Organization doesn't have) to
+     * populate a Stripe Customer's email, so this must override it rather
+     * than being a same-purpose method under a different name. Cashier
+     * doesn't require an email (a Customer can exist without one), but
      * Checkout is worse without one. Organizations have no email column of
      * their own, so this resolves to whoever owns the account.
      */
-    public function billingEmail(): ?string
+    public function stripeEmail(): ?string
     {
         return $this->users()->wherePivot('role', 'owner')->first()?->email;
     }
